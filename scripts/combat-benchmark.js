@@ -94,10 +94,14 @@ for (const matchup of MATCHUPS) {
     const config = scenarioConfig(matchup.a, matchup.b, seed);
     const result = runner.run({ config, ticks, sampleInterval: Math.max(500, Math.floor(ticks / 20)) });
     const [a, b] = result.metrics.colonies;
+    const yieldOf = (colony) => (colony.resources + colony.foodStock)
+      / Math.max(1, colony.deaths + colony.attacks);
     runs.push({
       seed,
       populationA: a.totalPopulation,
       populationB: b.totalPopulation,
+      livingAntsA: a.livingAnts,
+      livingAntsB: b.livingAnts,
       collectedA: a.resources,
       collectedB: b.resources,
       foodStockA: a.foodStock,
@@ -111,6 +115,8 @@ for (const matchup of MATCHUPS) {
       threats: result.metrics.threats,
       fights: result.metrics.fights,
       attacks: result.metrics.attacks,
+      attacksA: a.attacks,
+      attacksB: b.attacks,
       damageDealt: result.metrics.damageDealt,
       combatDeaths: result.metrics.combatDeaths,
       killsA: a.kills,
@@ -123,6 +129,8 @@ for (const matchup of MATCHUPS) {
       distanceA: a.totalDistance,
       distanceB: b.totalDistance,
       dangerDistance: result.metrics.dangerDistance,
+      yieldA: yieldOf(a),
+      yieldB: yieldOf(b),
     });
   }
   results.set(matchup.id, { matchup, runs });
@@ -132,16 +140,34 @@ function mean(values) {
   return values.length === 0 ? 0 : values.reduce((total, value) => total + value, 0) / values.length;
 }
 
+function round(value) {
+  return Number(value.toFixed(2));
+}
+
+function statRow(label, values) {
+  const stats = summarize(values);
+  return {
+    métrique: label,
+    moyenne: round(stats.mean),
+    médiane: round(stats.median),
+    "écart-type": round(stats.standardDeviation),
+    min: round(stats.min),
+    max: round(stats.max),
+  };
+}
+
 function report(matchupId) {
   const entry = results.get(matchupId);
   if (!entry) return;
   const { matchup, runs } = entry;
   const labelA = PROFILES[matchup.a].label;
   const labelB = PROFILES[matchup.b].label;
-  console.log(`\n=== ${labelA} (A) vs ${labelB} (B) — ${runs.length} seed(s), ${ticks} ticks ===`);
+  const seeds = runs.length;
+  console.log(`\n=== ${labelA} (A) vs ${labelB} (B) — ${seeds} seed(s), ${ticks} ticks ===`);
 
-  const perColony = [
+  const perColonyKeys = [
     ["population finale", "populationA", "populationB"],
+    ["ouvrières vivantes", "livingAntsA", "livingAntsB"],
     ["collecte totale", "collectedA", "collectedB"],
     ["stock final", "foodStockA", "foodStockB"],
     ["naissances", "birthsA", "birthsB"],
@@ -150,31 +176,38 @@ function report(matchupId) {
     ["pertes de combat", "combatLossesA", "combatLossesB"],
     ["territoire contrôlé", "territoryA", "territoryB"],
     ["distance parcourue", "distanceA", "distanceB"],
+    ["rendement stratégique", "yieldA", "yieldB"],
   ];
-  console.table(perColony.map(([label, keyA, keyB]) => ({
-    métrique: label,
-    [`${labelA} (A)`]: Number(mean(runs.map((run) => run[keyA])).toFixed(2)),
-    [`${labelB} (B)`]: Number(mean(runs.map((run) => run[keyB])).toFixed(2)),
-  })));
+  console.log(`--- ${labelA} (A) ---`);
+  console.table(perColonyKeys.map(([label, keyA]) => statRow(label, runs.map((run) => run[keyA]))));
+  console.log(`--- ${labelB} (B) ---`);
+  console.table(perColonyKeys.map(([label, , keyB]) => statRow(label, runs.map((run) => run[keyB]))));
 
+  const survivedA = runs.filter((run) => run.livingAntsA > 0).length;
+  const survivedB = runs.filter((run) => run.livingAntsB > 0).length;
+  console.table([{
+    "seeds où A survit": `${survivedA}/${seeds}`,
+    "seeds où B survit": `${survivedB}/${seeds}`,
+  }]);
+
+  console.log("--- Métriques partagées de rencontre ---");
   const shared = ["foreignContacts", "avoidedContacts", "threats", "fights", "attacks", "damageDealt",
     "combatDeaths", "contestedArea", "dangerDistance"];
-  console.table(shared.map((metric) => {
-    const stats = summarize(runs.map((run) => run[metric]));
-    return {
-      métrique: metric,
-      moyenne: Number(stats.mean.toFixed(2)),
-      médiane: Number(stats.median.toFixed(2)),
-      min: Number(stats.min.toFixed(2)),
-      max: Number(stats.max.toFixed(2)),
-    };
-  }));
+  console.table(shared.map((metric) => statRow(metric, runs.map((run) => run[metric]))));
 
-  const efficiencyA = mean(runs.map((run) => (run.attacks === 0 ? 0 : run.killsA / run.attacks)));
-  const efficiencyB = mean(runs.map((run) => (run.attacks === 0 ? 0 : run.killsB / run.attacks)));
+  const efficiency = (killsKey, attacksKey) => summarize(runs.map((run) => (
+    run[attacksKey] === 0 ? 0 : run[killsKey] / run[attacksKey]
+  )));
+  const effA = efficiency("killsA", "attacksA");
+  const effB = efficiency("killsB", "attacksB");
   console.table([{
-    "efficacité militaire A (kills/attacks)": Number(efficiencyA.toFixed(3)),
-    "efficacité militaire B (kills/attacks)": Number(efficiencyB.toFixed(3)),
+    profil: `${labelA} (A)`,
+    "efficacité militaire moyenne (kills/attacks)": round(effA.mean),
+    "écart-type": round(effA.standardDeviation),
+  }, {
+    profil: `${labelB} (B)`,
+    "efficacité militaire moyenne (kills/attacks)": round(effB.mean),
+    "écart-type": round(effB.standardDeviation),
   }]);
 
   return {
