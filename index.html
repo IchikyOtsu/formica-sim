@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="./src/styles.css" />
+    <link rel="stylesheet" href="./src/styles.css?v=0.9.1" />
   </head>
   <body>
     <main class="app-shell">
@@ -22,7 +22,10 @@
             <h1>FORMICA <span>/ SIM V0.9</span></h1>
           </div>
         </div>
-        <div class="status-pill"><span></span> Système opérationnel</div>
+        <div class="status-pill" id="runtime-status" role="status">
+          <span class="status-dot" aria-hidden="true"></span>
+          <span id="runtime-status-text">Démarrage…</span>
+        </div>
       </header>
 
       <section class="workspace">
@@ -249,6 +252,6 @@
         </section>
       </section>
     </main>
-    <script type="module" src="./src/main.js"></script>
+    <script type="module" src="./src/main.js?v=0.9.1"></script>
   </body>
 </html>

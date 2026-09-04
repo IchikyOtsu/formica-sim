@@ -13,6 +13,7 @@ export class TimeSeriesRenderer {
   }
 
   render(samples) {
+    if (!this.context) return;
     const rect = this.canvas.getBoundingClientRect();
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     this.canvas.width = Math.max(1, Math.round(rect.width * dpr));

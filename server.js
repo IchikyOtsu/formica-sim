@@ -23,7 +23,10 @@ createServer((request, response) => {
     return;
   }
 
-  response.writeHead(200, { "Content-Type": types[extname(file)] ?? "application/octet-stream" });
+  response.writeHead(200, {
+    "Content-Type": types[extname(file)] ?? "application/octet-stream",
+    "Cache-Control": "no-store, max-age=0",
+  });
   createReadStream(file).pipe(response);
 }).listen(port, () => {
   console.log(`Formica Sim running at http://localhost:${port}`);

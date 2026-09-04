@@ -9,10 +9,12 @@ import { Simulation } from "./simulation/Simulation.js";
 import { DEFAULT_CONFIG } from "./simulation/SimulationConfig.js";
 
 const simulation = new Simulation();
-const APP_VERSION = "0.9.0";
+const APP_VERSION = "0.9.1";
 const renderer = new Renderer(document.querySelector("#world"));
 const playPause = document.querySelector("#play-pause");
 const buttonText = playPause.querySelector(".button-text");
+const runtimeStatus = document.querySelector("#runtime-status");
+const runtimeStatusText = document.querySelector("#runtime-status-text");
 const speedButtons = [...document.querySelectorAll(".speed")];
 let running = true;
 let speed = 1;
@@ -22,6 +24,16 @@ let recorder;
 let eventLog;
 let replayController;
 let lastAnalysisSignature = "";
+let analyticsRenderingEnabled = true;
+let worldRenderingEnabled = true;
+let runtimeFailed = false;
+
+function reportRuntimeError(scope, error) {
+  runtimeFailed = true;
+  runtimeStatus.classList.add("error");
+  runtimeStatusText.textContent = `Erreur ${scope} — voir la console`;
+  console.error(`[Formica Sim] Erreur ${scope}`, error);
+}
 
 const elements = {
   tick: document.querySelector("#tick"),
@@ -86,6 +98,7 @@ function resetAnalytics() {
   recorder.record(simulation, { force: true });
   replayController = new ReplayController(simulation, { onTick: observeTick });
   lastAnalysisSignature = "";
+  analyticsRenderingEnabled = true;
 }
 
 function observeTick() {
@@ -187,20 +200,49 @@ function renderAnalytics() {
 }
 
 function frame(now) {
+  // Planifier la prochaine frame en premier : une erreur d'affichage ponctuelle
+  // ne doit jamais arrêter définitivement la simulation.
+  requestAnimationFrame(frame);
   const frameDelta = Math.min(now - previousTime, 250);
   previousTime = now;
-  if (running) {
-    accumulator += frameDelta * speed;
-    while (accumulator >= simulation.config.tickDurationMs) {
-      simulation.tick();
-      observeTick();
-      accumulator -= simulation.config.tickDurationMs;
+  try {
+    if (running) {
+      accumulator += frameDelta * speed;
+      while (accumulator >= simulation.config.tickDurationMs) {
+        simulation.tick();
+        observeTick();
+        accumulator -= simulation.config.tickDurationMs;
+      }
+    }
+  } catch (error) {
+    setRunning(false);
+    reportRuntimeError("moteur", error);
+    return;
+  }
+  if (worldRenderingEnabled) {
+    try {
+      renderer.render(simulation);
+    } catch (error) {
+      worldRenderingEnabled = false;
+      reportRuntimeError("canvas", error);
     }
   }
-  renderer.render(simulation);
-  updateMetrics();
-  renderAnalytics();
-  requestAnimationFrame(frame);
+  try {
+    updateMetrics();
+  } catch (error) {
+    reportRuntimeError("métriques", error);
+  }
+  if (analyticsRenderingEnabled) {
+    try {
+      renderAnalytics();
+    } catch (error) {
+      analyticsRenderingEnabled = false;
+      reportRuntimeError("graphiques", error);
+    }
+  }
+  if (!runtimeFailed && simulation.tickCount > 0) {
+    runtimeStatusText.textContent = `Simulation active · tick ${simulation.tickCount}`;
+  }
 }
 
 function setRunning(nextRunning) {
