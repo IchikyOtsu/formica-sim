@@ -128,6 +128,11 @@ export const DEFAULT_CONFIG = Object.freeze({
   nestDiscoveryRadius: 40,
   raidGroupSize: 5,
   raidArrivalRadius: 20,
+  nestDefenseEnabled: true,
+  nestDefenseRadius: 50,
+  nestDefenseAlarmStrength: 4,
+  nestDefenseGraceTicks: 30,
+  threatPressureNestProximityWeight: 3,
   nest: { x: 135, y: 365, radius: 28 },
   foodSources: [
     { x: 625, y: 125, quantity: 100, radius: 20 },

@@ -2057,3 +2057,186 @@ test("raiding requires the SOLDIER caste and is invisible when castesEnabled sta
     assert.equal(colony.raidsStarted, 0);
   }
 });
+
+function defenseConfig(overrides = {}) {
+  return multiColonyConfig({
+    combatEnabled: true,
+    castesEnabled: true,
+    nestDefenseRadius: 30,
+    nestDefenseGraceTicks: 5,
+    ...overrides,
+  });
+}
+
+test("no defense trigger while an intruder stays outside nestDefenseRadius", () => {
+  const simulation = new Simulation(defenseConfig());
+  const colonyA = simulation.colonies[0];
+  // colony B's only ant starts at its own nest, 160 units away — well outside the 30-unit radius.
+  for (let tick = 0; tick < 50; tick += 1) simulation.tick();
+  assert.equal(colonyA.nestUnderThreat, false);
+  assert.equal(colonyA.raidersDetectedNearNest, 0);
+  assert.equal(colonyA.defenseActivations, 0);
+});
+
+test("defense triggers exactly at radius entry, raising threatPressure and local ALARM", () => {
+  const simulation = new Simulation(defenseConfig());
+  const colonyA = simulation.colonies[0];
+  const intruder = simulation.colonies[1].ants[0];
+  const field = simulation.colonyPheromones.get("A");
+
+  intruder.position = { x: colonyA.nest.position.x + 31, y: colonyA.nest.position.y };
+  simulation.tick();
+  assert.equal(colonyA.nestUnderThreat, false, "just outside the radius: no trigger");
+  assert.equal(field.sample(PheromoneType.ALARM, colonyA.nest.position), 0);
+
+  intruder.position = { x: colonyA.nest.position.x + 29, y: colonyA.nest.position.y };
+  simulation.tick();
+  assert.equal(colonyA.nestUnderThreat, true, "one unit inside the radius: triggers immediately");
+  assert.equal(colonyA.raidersDetectedNearNest, 1);
+  assert.ok(colonyA.threatPressure > 0, "threatPressure should rise from the nest-proximity contact");
+  assert.ok(
+    field.sample(PheromoneType.ALARM, colonyA.nest.position) > 0,
+    "ALARM should be deposited locally around the threatened nest",
+  );
+  assert.ok(simulation.tickEvents.some((event) => event.type === "NEST_THREAT_DETECTED" && event.colonyId === "A"));
+  assert.ok(simulation.tickEvents.some((event) => event.type === "DEFENSE_ACTIVATED" && event.colonyId === "A"));
+});
+
+test("an available soldier converges on its own nest once mobilized to DEFENDING", () => {
+  const simulation = new Simulation(defenseConfig({ antSpeed: 20, directHomeNavigation: true }));
+  const colonyA = simulation.colonies[0];
+  const soldier = pushSoldier(colonyA, "A-SOLDIER-1", {
+    position: { x: colonyA.nest.position.x + 60, y: colonyA.nest.position.y },
+  });
+  const intruder = simulation.colonies[1].ants[0];
+  intruder.position = { x: colonyA.nest.position.x + 5, y: colonyA.nest.position.y };
+
+  simulation.tick();
+  assert.equal(soldier.state, AntState.DEFENDING);
+  assert.equal(colonyA.defendersMobilized, 1);
+
+  for (let tick = 0; tick < 30; tick += 1) simulation.tick();
+  const distance = Math.hypot(
+    soldier.position.x - colonyA.nest.position.x,
+    soldier.position.y - colonyA.nest.position.y,
+  );
+  assert.ok(distance < 60, "the defender should have moved toward its own nest, not toward the intruder's id");
+});
+
+test("a raiding soldier is recalled to DEFENDING when its own nest comes under threat", () => {
+  const simulation = new Simulation(defenseConfig({ antSpeed: 20 }));
+  const colonyA = simulation.colonies[0];
+  const colonyB = simulation.colonies[1];
+  const soldier = pushSoldier(colonyA, "A-SOLDIER-1");
+  colonyA.knownEnemyNests.set("B", {
+    position: { ...colonyB.nest.position },
+    discoveredTick: 0,
+    lastSeenTick: 0,
+  });
+  const raid = simulation.requestRaid("A", "B", 1);
+  assert.equal(soldier.state, AntState.RAIDING);
+
+  const intruder = colonyB.ants[0];
+  intruder.position = { x: colonyA.nest.position.x + 5, y: colonyA.nest.position.y };
+  simulation.tick();
+
+  assert.equal(soldier.state, AntState.DEFENDING, "DEFENDING outranks an in-progress RAIDING assignment");
+  assert.equal(soldier.raidId, null, "the soldier is cleanly pulled out of the raid's bookkeeping");
+  assert.ok(
+    raid.returnedIds.has(soldier.id) || raid.state === RaidState.COMPLETE,
+    "the recall counts as an accounted-for outcome for the abandoned raid",
+  );
+});
+
+test("a dead soldier is never mobilized to defend", () => {
+  const simulation = new Simulation(defenseConfig());
+  const colonyA = simulation.colonies[0];
+  const soldier = pushSoldier(colonyA, "A-SOLDIER-1");
+  soldier.state = AntState.DEAD;
+  const intruder = simulation.colonies[1].ants[0];
+  intruder.position = { x: colonyA.nest.position.x + 5, y: colonyA.nest.position.y };
+
+  simulation.tick();
+
+  assert.equal(soldier.state, AntState.DEAD);
+  assert.equal(colonyA.defendersMobilized, 0);
+});
+
+test("defense releases after the intruder leaves and the grace period elapses, crediting evacuated workers", () => {
+  const simulation = new Simulation(defenseConfig({ nestDefenseGraceTicks: 3 }));
+  const colonyA = simulation.colonies[0];
+  const worker = colonyA.ants[0];
+  const intruder = simulation.colonies[1].ants[0];
+
+  worker.position = { x: colonyA.nest.position.x + 5, y: colonyA.nest.position.y };
+  intruder.position = { x: colonyA.nest.position.x + 5, y: colonyA.nest.position.y };
+  simulation.tick();
+  assert.equal(colonyA.nestUnderThreat, true);
+
+  // the worker manages to slip out of the defense zone while the threat is still active.
+  worker.position = { x: colonyA.nest.position.x + 200, y: colonyA.nest.position.y };
+  intruder.position = { x: 100_000, y: 100_000 };
+  for (let tick = 0; tick < 10 && colonyA.nestUnderThreat; tick += 1) simulation.tick();
+
+  assert.equal(colonyA.nestUnderThreat, false, "defense releases once the grace period elapses");
+  assert.equal(colonyA.workersEvacuated, 1, "the worker that left the zone before release is credited");
+  assert.ok(simulation.tickEvents.some((event) => event.type === "DEFENSE_RELEASED" && event.colonyId === "A"));
+});
+
+test("nest defense replay is exact for an identical seed and configuration", () => {
+  const config = defenseConfig({ antSpeed: 12 });
+  const runOnce = () => {
+    const simulation = new Simulation(config);
+    pushSoldier(simulation.colonies[0], "A-SOLDIER-1");
+    const intruder = simulation.colonies[1].ants[0];
+    for (let tick = 0; tick < 200; tick += 1) {
+      if (tick > 20 && tick < 120) {
+        intruder.position = { x: simulation.colonies[0].nest.position.x + 5, y: simulation.colonies[0].nest.position.y };
+      }
+      simulation.tick();
+    }
+    return simulation;
+  };
+  const first = runOnce();
+  const second = runOnce();
+  assert.deepEqual(
+    first.colonies.map((colony) => ({
+      nestUnderThreat: colony.nestUnderThreat,
+      raidersDetectedNearNest: colony.raidersDetectedNearNest,
+      defenseActivations: colony.defenseActivations,
+      defendersMobilized: colony.defendersMobilized,
+      threatPressure: colony.threatPressure,
+    })),
+    second.colonies.map((colony) => ({
+      nestUnderThreat: colony.nestUnderThreat,
+      raidersDetectedNearNest: colony.raidersDetectedNearNest,
+      defenseActivations: colony.defenseActivations,
+      defendersMobilized: colony.defendersMobilized,
+      threatPressure: colony.threatPressure,
+    })),
+  );
+});
+
+test("nest defense stays fully inert when combatEnabled or nestDefenseEnabled is false", () => {
+  for (const overrides of [{ combatEnabled: false }, { nestDefenseEnabled: false }]) {
+    const simulation = new Simulation(defenseConfig(overrides));
+    const colonyA = simulation.colonies[0];
+    const intruder = simulation.colonies[1].ants[0];
+    intruder.position = { x: colonyA.nest.position.x + 5, y: colonyA.nest.position.y };
+    for (let tick = 0; tick < 50; tick += 1) simulation.tick();
+    assert.equal(colonyA.nestUnderThreat, false);
+    assert.equal(colonyA.raidersDetectedNearNest, 0);
+    assert.equal(colonyA.defenseActivations, 0);
+  }
+});
+
+test("nest defense runs without soldiers when castesEnabled is false, but never mobilizes a defender", () => {
+  const simulation = new Simulation(defenseConfig({ castesEnabled: false }));
+  const colonyA = simulation.colonies[0];
+  const intruder = simulation.colonies[1].ants[0];
+  intruder.position = { x: colonyA.nest.position.x + 5, y: colonyA.nest.position.y };
+  for (let tick = 0; tick < 50; tick += 1) simulation.tick();
+  assert.equal(colonyA.nestUnderThreat, true, "detection and ALARM do not depend on castes");
+  assert.equal(colonyA.defendersMobilized, 0, "no SOLDIER caste exists to mobilize");
+  assertSimulationInvariants(simulation);
+});

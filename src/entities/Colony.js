@@ -38,6 +38,13 @@ export class Colony {
     this.raidsFailed = 0;
     this.raidersSent = 0;
     this.raidersLost = 0;
+    this.nestUnderThreat = false;
+    this.nestThreatGraceRemaining = 0;
+    this.raidersDetectedNearNest = 0;
+    this.defenseActivations = 0;
+    this.defendersMobilized = 0;
+    this.defensiveKills = 0;
+    this.workersEvacuated = 0;
   }
 
   depositFood(amount) {

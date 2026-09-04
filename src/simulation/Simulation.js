@@ -196,6 +196,9 @@ export class Simulation {
     this.newCombatLossesThisTick = new Map();
     this.newForeignContactsThisTick = new Map();
     this.raids = new Map();
+    this.previousNestThreatContacts = new Map();
+    this.newNestThreatContactsThisTick = new Map();
+    this.workersSeenInDefenseZone = new Map();
 
     for (const colony of this.colonies) {
       const colonyConfig = this.colonyConfigs.get(colony.id);
@@ -296,6 +299,7 @@ export class Simulation {
       const colonyConfig = this.colonyConfigs.get(colony.id);
       const field = this.colonyPheromones.get(colony.id);
       this.detectEnemyNests(colony, colonyConfig);
+      this.detectNestThreats(colony, colonyConfig);
       for (const ant of colony.ants) {
       if (ant.state === AntState.DEAD) continue;
       if (this.config.combatEnabled && ant.combatCooldown > 0) ant.combatCooldown -= 1;
@@ -351,6 +355,13 @@ export class Simulation {
         targetDistance = this.returnHome.update(ant, navigation, localHome, deltaSeconds);
       } else if (ant.state === AntState.RAIDING) {
         targetDistance = this.raidTravelDistance(ant, colony);
+      } else if (ant.state === AntState.DEFENDING) {
+        const navigation = this.scoreDirection(ant, "RETURNING_HOME");
+        const detectionRadius = colonyConfig.directHomeNavigation
+          ? Infinity
+          : colonyConfig.homeDetectionRadius;
+        const localHome = this.homeDetection.suggestDirection(ant, colony.nest, detectionRadius);
+        targetDistance = this.returnHome.update(ant, navigation, localHome, deltaSeconds);
       } else {
         const food = ant.caste === Caste.SOLDIER ? null : this.foodDetection.findNearest(
           ant,
@@ -447,6 +458,15 @@ export class Simulation {
         }
       } else if (ant.state === AntState.RAIDING) {
         this.updateRaidTravel(ant, colony);
+      } else if (ant.state === AntState.DEFENDING) {
+        if (this.homeDetection.isInside(ant, colony.nest) && this.metabolism.needsFood(ant)) {
+          this.metabolism.feedAtNest(
+            ant,
+            colony,
+            colonyConfig.foodEnergyValue,
+            colonyConfig.resumeEnergyThreshold,
+          );
+        }
       } else {
         if (this.homeDetection.isInside(ant, colony.nest)) ant.distanceSinceNest = 0;
         if (colonyConfig.pheromonesEnabled) this.depositTrail(ant);
@@ -535,6 +555,7 @@ export class Simulation {
         extra.killerColony.kills += 1;
         if (extra.killerCaste === Caste.SOLDIER) extra.killerColony.soldierKills += 1;
         else extra.killerColony.workerKills += 1;
+        if (extra.killerIsDefending) extra.killerColony.defensiveKills += 1;
       }
       this.newCombatLossesThisTick.set(colony.id, (this.newCombatLossesThisTick.get(colony.id) ?? 0) + 1);
       this.emitEvent("COMBAT_DEATH", {
@@ -599,6 +620,86 @@ export class Simulation {
           tick: this.tickCount,
         };
       }
+    }
+  }
+
+  detectNestThreats(colony, colonyConfig) {
+    if (!colonyConfig.combatEnabled || !colonyConfig.nestDefenseEnabled || this.colonies.length < 2) return;
+    const radius = colonyConfig.nestDefenseRadius;
+    const radiusSquared = radius * radius;
+    const currentIds = new Set();
+    for (const other of this.colonies) {
+      if (other.id === colony.id) continue;
+      for (const ant of other.ants) {
+        if (ant.state === AntState.DEAD) continue;
+        const dx = ant.position.x - colony.nest.position.x;
+        const dy = ant.position.y - colony.nest.position.y;
+        if (dx * dx + dy * dy <= radiusSquared) currentIds.add(ant.id);
+      }
+    }
+    const previous = this.previousNestThreatContacts.get(colony.id) ?? new Set();
+    let newArrivals = 0;
+    for (const id of currentIds) {
+      if (previous.has(id)) continue;
+      newArrivals += 1;
+      colony.raidersDetectedNearNest += 1;
+      this.emitEvent("NEST_THREAT_DETECTED", { colonyId: colony.id, antId: id });
+    }
+    this.previousNestThreatContacts.set(colony.id, currentIds);
+    this.newNestThreatContactsThisTick.set(colony.id, newArrivals);
+
+    const presenceNow = currentIds.size > 0;
+    colony.nestThreatGraceRemaining = presenceNow
+      ? colonyConfig.nestDefenseGraceTicks
+      : Math.max(0, colony.nestThreatGraceRemaining - 1);
+    const wasUnderThreat = colony.nestUnderThreat;
+    colony.nestUnderThreat = presenceNow || colony.nestThreatGraceRemaining > 0;
+
+    if (colony.nestUnderThreat) {
+      const field = this.colonyPheromones.get(colony.id);
+      this.alarmDeposit.depositDeath(colony.nest.position, field, colonyConfig.nestDefenseAlarmStrength);
+    }
+
+    if (!wasUnderThreat && colony.nestUnderThreat) {
+      colony.defenseActivations += 1;
+      this.workersSeenInDefenseZone.set(colony.id, new Set());
+      this.emitEvent("DEFENSE_ACTIVATED", { colonyId: colony.id });
+    }
+
+    if (colony.nestUnderThreat) {
+      const zone = this.workersSeenInDefenseZone.get(colony.id) ?? new Set();
+      for (const ant of colony.ants) {
+        if (ant.state === AntState.DEAD || ant.caste !== Caste.WORKER) continue;
+        const dx = ant.position.x - colony.nest.position.x;
+        const dy = ant.position.y - colony.nest.position.y;
+        if (dx * dx + dy * dy <= radiusSquared) zone.add(ant.id);
+      }
+      this.workersSeenInDefenseZone.set(colony.id, zone);
+
+      for (const ant of colony.ants) {
+        if (ant.state === AntState.DEAD || ant.caste !== Caste.SOLDIER) continue;
+        if (ant.state !== AntState.SEARCHING_FOOD && ant.state !== AntState.RAIDING) continue;
+        if (ant.state === AntState.RAIDING) this.resolveRaidMemberOutcome(ant, colony, "RECALLED");
+        ant.state = AntState.DEFENDING;
+        ant.target = null;
+        colony.defendersMobilized += 1;
+      }
+    }
+
+    if (wasUnderThreat && !colony.nestUnderThreat) {
+      const zone = this.workersSeenInDefenseZone.get(colony.id) ?? new Set();
+      for (const workerId of zone) {
+        const worker = colony.ants.find((candidate) => candidate.id === workerId);
+        if (!worker || worker.state === AntState.DEAD) continue;
+        const dx = worker.position.x - colony.nest.position.x;
+        const dy = worker.position.y - colony.nest.position.y;
+        if (dx * dx + dy * dy > radiusSquared) colony.workersEvacuated += 1;
+      }
+      this.workersSeenInDefenseZone.delete(colony.id);
+      for (const ant of colony.ants) {
+        if (ant.state === AntState.DEFENDING) ant.state = AntState.SEARCHING_FOOD;
+      }
+      this.emitEvent("DEFENSE_RELEASED", { colonyId: colony.id });
     }
   }
 
@@ -668,8 +769,10 @@ export class Simulation {
       colony.raidersLost += 1;
     } else {
       raid.returnedIds.add(ant.id);
-      ant.state = AntState.SEARCHING_FOOD;
-      ant.returnReason = null;
+      if (outcome === "RETURNED") {
+        ant.state = AntState.SEARCHING_FOOD;
+        ant.returnReason = null;
+      }
     }
     const accountedFor = raid.returnedIds.size + raid.deadIds.size;
     if (accountedFor < raid.memberIds.size) return;
@@ -956,6 +1059,7 @@ export class Simulation {
         killerId: attacker.id,
         killerColony: colony,
         killerCaste: attacker.caste,
+        killerIsDefending: attacker.state === AntState.DEFENDING,
       });
     }
   }
@@ -968,9 +1072,11 @@ export class Simulation {
       const alarmAtNest = field.sample(PheromoneType.ALARM, colony.nest.position) / field.maxIntensity;
       const newContacts = this.newForeignContactsThisTick.get(colony.id) ?? 0;
       const newDeaths = this.newCombatLossesThisTick.get(colony.id) ?? 0;
+      const newNestContacts = this.newNestThreatContactsThisTick.get(colony.id) ?? 0;
       colony.threatPressure = colony.threatPressure * colonyConfig.threatPressureDecay
         + newContacts * colonyConfig.threatPressureContactWeight
         + newDeaths * colonyConfig.threatPressureDeathWeight
+        + newNestContacts * colonyConfig.threatPressureNestProximityWeight
         + alarmAtNest * colonyConfig.threatPressureAlarmWeight;
     }
   }
@@ -1235,6 +1341,14 @@ export class Simulation {
       raidersSent: colony.raidersSent,
       raidersLost: colony.raidersLost,
       activeRaiders: colony.ants.filter((ant) => ant.raidId !== null).length,
+      nestUnderThreat: colony.nestUnderThreat,
+      raidersDetectedNearNest: colony.raidersDetectedNearNest,
+      defenseActivations: colony.defenseActivations,
+      defendersMobilized: colony.defendersMobilized,
+      defendingNow: livingAnts.filter((ant) => ant.state === AntState.DEFENDING).length,
+      defensiveKills: colony.defensiveKills,
+      workersEvacuated: colony.workersEvacuated,
+      nestAlarmIntensity: field.sample(PheromoneType.ALARM, colony.nest.position) / field.maxIntensity,
       foodPheromones,
       homePheromones,
       alarmPheromones,

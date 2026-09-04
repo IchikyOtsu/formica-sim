@@ -28,6 +28,9 @@ export function inspectSimulationInvariants(simulation) {
     if (ant.state === AntState.RAIDING && ant.caste !== Caste.SOLDIER) {
       add("raider-must-be-soldier", ant.id);
     }
+    if (ant.state === AntState.DEFENDING && ant.caste !== Caste.SOLDIER) {
+      add("defender-must-be-soldier", ant.id);
+    }
   }
   for (const colony of simulation.colonies) {
     for (const [targetColonyId, intel] of colony.knownEnemyNests) {

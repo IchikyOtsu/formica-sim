@@ -5,6 +5,7 @@ export const AntState = Object.freeze({
   RETURNING_HOME: "RETURNING_HOME",
   RESTING: "RESTING",
   RAIDING: "RAIDING",
+  DEFENDING: "DEFENDING",
   DEAD: "DEAD",
 });
 
