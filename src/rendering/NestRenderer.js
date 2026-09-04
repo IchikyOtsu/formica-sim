@@ -24,7 +24,7 @@ function chamberLabel(chamber) {
 // chambre QUEEN/BROOD d'origine, une fois d'une seule variante ou la
 // colonie en construit plusieurs.
 export class NestRenderer {
-  render(ctx, canvas, colony, interior, tickCount = 0) {
+  render(ctx, canvas, colony, interior, tickCount = 0, nestInteriorEnabled = true) {
     const width = canvas.width;
     const height = canvas.height;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -44,6 +44,26 @@ export class NestRenderer {
     this.drawQueen(ctx, interior, colony);
     this.drawBrood(ctx, interior, colony);
     this.drawAnts(ctx, interior, colony, tickCount);
+
+    if (!nestInteriorEnabled) this.drawDisabledNotice(ctx, width, height);
+  }
+
+  // La vue intérieure est toujours affichable (les cinq chambres existent
+  // pour chaque colonie), mais tant que `nestInteriorEnabled` n'est pas
+  // activé pour cette colonie, aucune fourmi n'y entrera jamais — sans ce
+  // message, la pièce vide donne l'impression d'une fonctionnalité cassée.
+  drawDisabledNotice(ctx, width, height) {
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.fillStyle = "rgba(24, 29, 20, 0.72)";
+    ctx.fillRect(0, height - 34, width, 34);
+    ctx.fillStyle = "#e8c34a";
+    ctx.font = "13px 'DM Mono', monospace";
+    ctx.textAlign = "center";
+    ctx.fillText(
+      "Vue intérieure inactive pour cette colonie — coche « Vue intérieure du nid » dans les paramètres",
+      width / 2,
+      height - 13,
+    );
   }
 
   computeBounds(interior) {

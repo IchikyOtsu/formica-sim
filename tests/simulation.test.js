@@ -3481,3 +3481,13 @@ test("V1.5.3.13 NestRenderer draws a growing nest (extra chambers, a pending sit
   const canvas = { width: 300, height: 200 };
   assert.doesNotThrow(() => new NestRenderer().render(ctx, canvas, colonyA, interior, simulation.tickCount));
 });
+
+test("V1.5.3.14 NestRenderer shows a disabled notice instead of leaving the empty room unexplained", () => {
+  const simulation = new Simulation(multiColonyConfig({ nestInteriorEnabled: false }));
+  const colonyA = simulation.colonies[0];
+  const interior = simulation.nestInteriors.get(colonyA.id);
+  const noop = () => {};
+  const ctx = new Proxy({}, { get: () => noop });
+  const canvas = { width: 300, height: 200 };
+  assert.doesNotThrow(() => new NestRenderer().render(ctx, canvas, colonyA, interior, simulation.tickCount, false));
+});

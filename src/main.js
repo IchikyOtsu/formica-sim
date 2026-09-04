@@ -312,7 +312,8 @@ function frame(now) {
         const interior = simulation.nestInteriors.get(viewMode);
         if (colony && interior) {
           renderer.resize();
-          nestRenderer.render(renderer.context, renderer.canvas, colony, interior, simulation.tickCount);
+          const nestInteriorEnabled = simulation.colonyConfigs.get(viewMode)?.nestInteriorEnabled ?? false;
+          nestRenderer.render(renderer.context, renderer.canvas, colony, interior, simulation.tickCount, nestInteriorEnabled);
         }
       }
     } catch (error) {
