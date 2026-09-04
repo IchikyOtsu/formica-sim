@@ -11,7 +11,7 @@ import { ReturnHomeBehavior } from "../src/behaviors/ReturnHomeBehavior.js";
 import { Ant, AntState, Caste } from "../src/entities/Ant.js";
 import { RaidState } from "../src/entities/Raid.js";
 import { RaidDecisionSystem } from "../src/systems/RaidDecisionSystem.js";
-import { TacticalOverlaySystem, OverlayType } from "../src/systems/TacticalOverlaySystem.js";
+import { TacticalOverlaySystem, OverlayType, DEFAULT_OVERLAY_VISIBILITY } from "../src/systems/TacticalOverlaySystem.js";
 import { Brood, BroodStage } from "../src/entities/Brood.js";
 import { FoodSource, FoodSourceState } from "../src/entities/FoodSource.js";
 import { DangerZone } from "../src/environment/DangerZone.js";
@@ -2727,4 +2727,85 @@ test("the renderer exposes a tactical overlay toggle independent from pheromone/
   assert.equal(renderer.tacticalOverlaysEnabled, true, "on by default");
   renderer.setTacticalOverlaysEnabled(false);
   assert.equal(renderer.tacticalOverlaysEnabled, false);
+});
+
+test("the renderer exposes per-category overlay toggles and rejects unknown categories", () => {
+  const renderer = new Renderer({ getContext: () => ({}) });
+  assert.equal(renderer.overlayVisibility.combat, true);
+  renderer.setOverlayCategoryVisible("combat", false);
+  assert.equal(renderer.overlayVisibility.combat, false);
+  assert.throws(() => renderer.setOverlayCategoryVisible("nonsense", true));
+});
+
+test("TacticalOverlaySystem flags a nest under threat and clears it once the threat lifts", () => {
+  const simulation = new Simulation(defenseConfig());
+  const colonyA = simulation.colonies[0];
+  const intruder = simulation.colonies[1].ants[0];
+  intruder.position = { x: colonyA.nest.position.x + 5, y: colonyA.nest.position.y };
+  simulation.tick();
+
+  let overlays = new TacticalOverlaySystem().collect(simulation);
+  const threatMarker = overlays.find((overlay) => overlay.type === OverlayType.NEST_UNDER_THREAT);
+  assert.ok(threatMarker);
+  assert.equal(threatMarker.colonyId, "A");
+
+  intruder.position = { x: -1000, y: -1000 };
+  for (let tick = 0; tick < 20 && colonyA.nestUnderThreat; tick += 1) simulation.tick();
+  overlays = new TacticalOverlaySystem().collect(simulation);
+  assert.equal(overlays.some((overlay) => overlay.type === OverlayType.NEST_UNDER_THREAT), false);
+});
+
+test("TacticalOverlaySystem raises an ALARM_ALERT only once the nest signal crosses the threshold", () => {
+  const simulation = new Simulation(defenseConfig());
+  const colonyA = simulation.colonies[0];
+  const overlaysBefore = new TacticalOverlaySystem().collect(simulation);
+  assert.equal(overlaysBefore.some((overlay) => overlay.type === OverlayType.ALARM_ALERT), false);
+
+  const intruder = simulation.colonies[1].ants[0];
+  intruder.position = { x: colonyA.nest.position.x + 5, y: colonyA.nest.position.y };
+  for (let tick = 0; tick < 30; tick += 1) simulation.tick();
+
+  const overlaysAfter = new TacticalOverlaySystem().collect(simulation);
+  const alert = overlaysAfter.find((overlay) => overlay.type === OverlayType.ALARM_ALERT && overlay.colonyId === "A");
+  assert.ok(alert, "sustained nest-defense ALARM should eventually cross the alert threshold");
+  assert.ok(alert.payload.intensity >= 0.45);
+});
+
+test("TacticalOverlaySystem turns a combat event into a short-lived flash marker, ingested once per tick", () => {
+  const system = new TacticalOverlaySystem();
+  system.ingestEvents([
+    { type: "COMBAT_STARTED", colonyId: "A", antId: "A-1", position: { x: 10, y: 20 } },
+  ], 100);
+  let overlays = system.collect({ colonies: [], raids: new Map(), colonyPheromones: new Map(), tickCount: 100 });
+  const marker = overlays.find((overlay) => overlay.type === OverlayType.COMBAT);
+  assert.ok(marker);
+  assert.deepEqual({ x: marker.x, y: marker.y }, { x: 10, y: 20 });
+
+  overlays = system.collect({ colonies: [], raids: new Map(), colonyPheromones: new Map(), tickCount: 100 + 1000 });
+  assert.equal(overlays.some((overlay) => overlay.type === OverlayType.COMBAT), false, "the flash must expire");
+});
+
+test("TacticalOverlaySystem turns a combat death into a distinct, longer-lived flash marker", () => {
+  const system = new TacticalOverlaySystem();
+  system.ingestEvents([
+    { type: "COMBAT_DEATH", colonyId: "A", antId: "A-1", position: { x: 5, y: 5 } },
+  ], 50);
+  const overlays = system.collect({ colonies: [], raids: new Map(), colonyPheromones: new Map(), tickCount: 50 });
+  const marker = overlays.find((overlay) => overlay.type === OverlayType.COMBAT_DEATH);
+  assert.ok(marker);
+});
+
+test("overlay visibility categories independently filter what collect() returns", () => {
+  const simulation = new Simulation(pillageConfig());
+  const colonyA = simulation.colonies[0];
+  const soldier = pushSoldier(colonyA, "A-SOLDIER-1");
+  soldier.raidCargo = 4;
+  setupRaid(simulation);
+
+  const system = new TacticalOverlaySystem();
+  const allOff = Object.fromEntries(Object.keys(DEFAULT_OVERLAY_VISIBILITY).map((key) => [key, false]));
+  const withOnlyLoot = { ...allOff, loot: true };
+  const overlays = system.collect(simulation, withOnlyLoot);
+  assert.ok(overlays.every((overlay) => overlay.type === OverlayType.LOOT_CARRIED));
+  assert.ok(overlays.length > 0);
 });

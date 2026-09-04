@@ -567,6 +567,7 @@ export class Simulation {
         antId: ant.id,
         killerColonyId: extra.killerColony?.id ?? null,
         killerAntId: extra.killerId ?? null,
+        position: { ...ant.position },
       });
       if (colonyConfig.pheromonesEnabled && colonyConfig.alarmPheromonesEnabled) {
         this.alarmDeposit.depositDeath(
@@ -1102,6 +1103,7 @@ export class Simulation {
         antId: attacker.id,
         foreignColonyId: opponentColony.id,
         foreignAntId: defender.id,
+        position: { ...attacker.position },
       });
     }
     const roll = deterministicEventRoll(this.config.seed, this.tickCount, attacker.id, defender.id);
@@ -1121,6 +1123,7 @@ export class Simulation {
       foreignColonyId: opponentColony.id,
       foreignAntId: defender.id,
       damage,
+      position: { ...attacker.position },
     });
     if (defender.health <= 0 && defender.state !== AntState.DEAD) {
       defender.state = AntState.DEAD;

@@ -114,6 +114,7 @@ function resetAnalytics() {
 function observeTick() {
   recorder.record(simulation);
   eventLog.capture(simulation.tickEvents);
+  renderer.tacticalOverlaySystem.ingestEvents(simulation.tickEvents, simulation.tickCount);
   if (running) inspectPauseConditions();
 }
 
@@ -348,6 +349,21 @@ document.querySelector("#territory-layer").addEventListener("change", (event) =>
 document.querySelector("#tactical-overlays-toggle").addEventListener("change", (event) => {
   renderer.setTacticalOverlaysEnabled(event.target.checked);
 });
+
+const OVERLAY_CATEGORY_CHECKBOXES = {
+  "#overlay-raids": "raids",
+  "#overlay-raid-routes": "raidRoutes",
+  "#overlay-known-nests": "knownNests",
+  "#overlay-defense": "defense",
+  "#overlay-combat": "combat",
+  "#overlay-loot": "loot",
+  "#overlay-alarm": "alarm",
+};
+for (const [selector, category] of Object.entries(OVERLAY_CATEGORY_CHECKBOXES)) {
+  document.querySelector(selector).addEventListener("change", (event) => {
+    renderer.setOverlayCategoryVisible(category, event.target.checked);
+  });
+}
 
 // Un preset comme "Combat équilibré V1.2" fixe des seuils de combat/castes
 // différents par colonie ; ces clés priment sur la config globale. Le

@@ -2,7 +2,7 @@ import { PheromoneType } from "../simulation/PheromoneField.js";
 import { AntState, Caste } from "../entities/Ant.js";
 import { BroodStage } from "../entities/Brood.js";
 import { TerritoryState } from "../simulation/TerritoryMap.js";
-import { TacticalOverlaySystem } from "../systems/TacticalOverlaySystem.js";
+import { TacticalOverlaySystem, DEFAULT_OVERLAY_VISIBILITY } from "../systems/TacticalOverlaySystem.js";
 import { MapMarkerRenderer } from "./MapMarkerRenderer.js";
 
 function colorToRgb(color) {
@@ -19,6 +19,7 @@ export class Renderer {
     this.pheromoneMode = "BOTH";
     this.territoryMode = "COLONIES";
     this.tacticalOverlaysEnabled = true;
+    this.overlayVisibility = { ...DEFAULT_OVERLAY_VISIBILITY };
     this.tacticalOverlaySystem = new TacticalOverlaySystem();
     this.mapMarkerRenderer = new MapMarkerRenderer();
   }
@@ -29,6 +30,13 @@ export class Renderer {
 
   setTacticalOverlaysEnabled(visible) {
     this.tacticalOverlaysEnabled = visible;
+  }
+
+  setOverlayCategoryVisible(category, visible) {
+    if (!Object.hasOwn(this.overlayVisibility, category)) {
+      throw new Error(`Unknown overlay category: ${category}`);
+    }
+    this.overlayVisibility[category] = visible;
   }
 
   setPheromoneMode(mode) {
@@ -86,7 +94,7 @@ export class Renderer {
     }
     if (this.tacticalOverlaysEnabled) {
       const colonyColors = new Map(colonies.map((colony) => [colony.id, colony.color]));
-      const overlays = this.tacticalOverlaySystem.collect(simulation);
+      const overlays = this.tacticalOverlaySystem.collect(simulation, this.overlayVisibility);
       this.mapMarkerRenderer.render(ctx, overlays, colonyColors);
     }
   }
