@@ -8,7 +8,12 @@ export class RaidSystem {
 
   availableRaiders(colony, groupSize) {
     return colony.ants
-      .filter((ant) => ant.state !== AntState.DEAD && ant.caste === Caste.SOLDIER && ant.raidId === null)
+      .filter((ant) => (
+        ant.state !== AntState.DEAD
+        && ant.locationType !== "NEST"
+        && ant.caste === Caste.SOLDIER
+        && ant.raidId === null
+      ))
       .slice(0, groupSize);
   }
 

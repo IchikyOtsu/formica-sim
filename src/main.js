@@ -7,12 +7,15 @@ import { evaluatePauseConditions } from "./observability/PauseConditions.js";
 import { SCENARIO_PRESETS, SCENARIO_CATEGORIES, configForPreset } from "./experiments/ScenarioPresets.js";
 import { analyticsConfigFrom, toVersionedConfig, CONFIG_SECTIONS } from "./config/ConfigSchema.js";
 import { Renderer } from "./rendering/Renderer.js";
+import { NestRenderer } from "./rendering/NestRenderer.js";
 import { Simulation } from "./simulation/Simulation.js";
 import { DEFAULT_CONFIG } from "./simulation/SimulationConfig.js";
 
 const simulation = new Simulation(configForPreset("complete-v1.4"));
 const APP_VERSION = "1.1.0";
 const renderer = new Renderer(document.querySelector("#world"));
+const nestRenderer = new NestRenderer();
+let viewMode = "WORLD";
 const playPause = document.querySelector("#play-pause");
 const buttonText = playPause.querySelector(".button-text");
 const runtimeStatus = document.querySelector("#runtime-status");
@@ -83,6 +86,7 @@ const elements = {
   sampleCount: document.querySelector("#sample-count"),
   eventLog: document.querySelector("#event-log"),
   replayTick: document.querySelector("#replay-tick"),
+  viewSelector: document.querySelector("#view-selector"),
   replayStatus: document.querySelector("#replay-status"),
   preset: document.querySelector("#scenario-preset"),
   pauseDeath: document.querySelector("#pause-death"),
@@ -227,6 +231,8 @@ function renderColonyMetrics(colonies) {
       ["Raids (lancés/réussis/échoués)", `${colony.raidsStarted} / ${colony.raidsCompleted} / ${colony.raidsFailed}`],
       ["Nourriture volée / rapportée", `${colony.foodStolen.toFixed(1)} / ${colony.foodRecovered.toFixed(1)}`],
       ["Butin perdu au sol", colony.foodDropped.toFixed(1)],
+      ["Dehors / Dans le nid", `${colony.antsOutside} / ${colony.antsInsideNest}`],
+      ["Au stockage", colony.antsInStorage],
     ];
     for (const [label, value] of rows) {
       const term = document.createElement("dt");
@@ -295,7 +301,16 @@ function frame(now) {
   }
   if (worldRenderingEnabled) {
     try {
-      renderer.render(simulation);
+      if (viewMode === "WORLD") {
+        renderer.render(simulation);
+      } else {
+        const colony = simulation.colonies.find((candidate) => candidate.id === viewMode);
+        const interior = simulation.nestInteriors.get(viewMode);
+        if (colony && interior) {
+          renderer.resize();
+          nestRenderer.render(renderer.context, renderer.canvas, colony, interior);
+        }
+      }
     } catch (error) {
       worldRenderingEnabled = false;
       reportRuntimeError("canvas", error);
@@ -338,6 +353,11 @@ document.querySelector("#reset").addEventListener("click", () => {
   updateMetrics();
 });
 
+elements.viewSelector.addEventListener("change", (event) => {
+  viewMode = event.target.value;
+});
+refreshViewSelector();
+
 document.querySelector("#pheromone-layer").addEventListener("change", (event) => {
   renderer.setPheromoneMode(event.target.value);
 });
@@ -371,6 +391,7 @@ for (const [selector, category] of Object.entries(OVERLAY_CATEGORY_CHECKBOXES)) 
 // colonies au moment d'appliquer pour que les curseurs aient un effet visible.
 const COLONY_OVERRIDE_KEYS_TO_RESET = [
   ...CONFIG_SECTIONS.combat, ...CONFIG_SECTIONS.castes, ...CONFIG_SECTIONS.raids,
+  ...CONFIG_SECTIONS.nestInterior,
 ];
 
 document.querySelector("#parameters-form").addEventListener("submit", (event) => {
@@ -434,6 +455,7 @@ document.querySelector("#parameters-form").addEventListener("submit", (event) =>
     maxRaidSize: Number(document.querySelector("#param-max-raid-size").value),
     minStockToRaid: Number(document.querySelector("#param-min-stock-to-raid").value),
     raidCooldownTicks: Number(document.querySelector("#param-raid-cooldown").value),
+    nestInteriorEnabled: document.querySelector("#param-nest-interior-enabled").checked,
   });
   resetAnalytics();
   accumulator = 0;
@@ -498,8 +520,27 @@ function applyConfigToForm(config) {
   document.querySelector("#param-alarm").checked = config.alarmPheromonesEnabled;
   document.querySelector("#param-combat-enabled").checked = config.combatEnabled;
   document.querySelector("#param-castes-enabled").checked = config.castesEnabled;
+  document.querySelector("#param-nest-interior-enabled").checked = config.nestInteriorEnabled;
   document.querySelector("#param-pillage-enabled").checked = config.pillageEnabled;
   document.querySelector("#param-auto-raid-enabled").checked = config.autoRaidEnabled;
+}
+
+function refreshViewSelector() {
+  const previousValue = elements.viewSelector.value;
+  elements.viewSelector.replaceChildren();
+  const worldOption = document.createElement("option");
+  worldOption.value = "WORLD";
+  worldOption.textContent = "Monde";
+  elements.viewSelector.append(worldOption);
+  for (const colony of simulation.colonies) {
+    const option = document.createElement("option");
+    option.value = colony.id;
+    option.textContent = `Nid ${colony.name}`;
+    elements.viewSelector.append(option);
+  }
+  const stillValid = [...elements.viewSelector.options].some((option) => option.value === previousValue);
+  viewMode = stillValid ? previousValue : "WORLD";
+  elements.viewSelector.value = viewMode;
 }
 
 function loadConfiguration(config) {
@@ -507,6 +548,7 @@ function loadConfiguration(config) {
   simulation.reconfigure(config);
   applyConfigToForm(simulation.config);
   elements.sampleInterval.value = analytics.sampleInterval;
+  refreshViewSelector();
   resetAnalytics();
   accumulator = 0;
   elements.pauseReason.textContent = "En attente d’un événement";

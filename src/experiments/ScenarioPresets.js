@@ -160,6 +160,18 @@ export const SCENARIO_PRESETS = Object.freeze([
     },
   },
   {
+    id: "nest-interior",
+    name: "Vue intérieure du nid",
+    description: "Une seule colonie : bascule sur « Vue → Nid C-01 » pour suivre une ouvrière entrer, traverser l'intérieur, déposer sa récolte au Stock, se reposer si besoin, puis ressortir.",
+    category: "competition",
+    seed: 1847,
+    duration: 20_000,
+    config: {
+      nestInteriorEnabled: true,
+      antSpeed: 20,
+    },
+  },
+  {
     id: "reference-v1",
     name: "Référence V1.0",
     description: "Scénario officiel : 50 ouvrières, saisons modérées et ALARM équilibrée.",

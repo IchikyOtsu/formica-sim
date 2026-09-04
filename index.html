@@ -161,6 +161,11 @@
           <div class="controls" role="group" aria-label="Contrôles de simulation">
             <button id="play-pause" class="primary" type="button"><span class="pause-icon" aria-hidden="true"></span><span class="button-text">Pause</span></button>
             <button id="reset" type="button"><span class="reset-icon" aria-hidden="true">↻</span> Reset</button>
+            <label class="layer-control">Vue
+              <select id="view-selector" aria-label="Vue affichée : monde ou intérieur d'un nid">
+                <option value="WORLD">Monde</option>
+              </select>
+            </label>
             <label class="layer-control">Pistes
               <select id="pheromone-layer" aria-label="Couche de phéromones visible">
                 <option value="BOTH">Toutes</option>
@@ -253,6 +258,8 @@
               <label>Taille max. raid<input id="param-max-raid-size" type="number" min="1" max="50" step="1" value="6" /></label>
               <label>Stock min. pour raider<input id="param-min-stock-to-raid" type="number" min="0" max="2000" step="1" value="50" /></label>
               <label>Cooldown raid<input id="param-raid-cooldown" type="number" min="0" max="100000" step="100" value="1500" /></label>
+              <label class="check-label">Vue intérieure du nid<input id="param-nest-interior-enabled" type="checkbox" /></label>
+              <p class="field-hint">Bascule ensuite sur « Vue → Nid A/B » pour observer l'intérieur : entrée, stockage, repos, sortie.</p>
               <button type="submit">Appliquer + Reset</button>
             </form>
           </details>

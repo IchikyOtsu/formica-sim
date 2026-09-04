@@ -6,6 +6,7 @@ export const AntState = Object.freeze({
   RESTING: "RESTING",
   RAIDING: "RAIDING",
   DEFENDING: "DEFENDING",
+  IN_NEST: "IN_NEST",
   DEAD: "DEAD",
 });
 
@@ -68,5 +69,11 @@ export class Ant {
     this.raidId = null;
     this.raidCarryCapacity = raidCarryCapacity;
     this.raidCargo = 0;
+    this.locationType = "WORLD";
+    this.nestId = null;
+    this.nestPosition = null;
+    this.nestChamberId = null;
+    this.nestTask = "NONE";
+    this.nestTransitionCooldown = 0;
   }
 }

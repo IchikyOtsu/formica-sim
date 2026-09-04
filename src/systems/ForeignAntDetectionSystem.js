@@ -2,7 +2,9 @@ import { AntState } from "../entities/Ant.js";
 
 export class ForeignAntDetectionSystem {
   update(colonies, radius) {
-    const living = colonies.flatMap((colony) => colony.ants.filter((ant) => ant.state !== AntState.DEAD));
+    const living = colonies.flatMap((colony) => colony.ants.filter((ant) => (
+      ant.state !== AntState.DEAD && ant.locationType !== "NEST"
+    )));
     for (const ant of living) ant.nearbyForeignAnts = [];
     const contacts = [];
     const radiusSquared = radius * radius;

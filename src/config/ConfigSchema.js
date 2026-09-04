@@ -60,6 +60,10 @@ export const CONFIG_SECTIONS = Object.freeze({
     "nestDefenseEnabled", "nestDefenseRadius", "nestDefenseAlarmStrength",
     "nestDefenseGraceTicks", "threatPressureNestProximityWeight",
   ]),
+  nestInterior: Object.freeze([
+    "nestInteriorEnabled", "nestInteriorSpeed", "nestChamberArrivalRadius",
+    "nestTransitionCooldownTicks",
+  ]),
   demography: Object.freeze([
     "initialFoodStock", "reproductionEnabled", "queenLayingCooldownTicks",
     "reproductionFoodThreshold", "eggFoodCost", "maxBrood", "maxWorkers",
@@ -128,6 +132,7 @@ export function validateFlatConfig(config) {
     "pheromoneCellSize", "pheromoneMaxIntensity", "seasonDurationTicks", "territoryFalloffDistance",
     "combatRadius", "combatMaxHealth", "soldierMaxHealth",
     "nestDiscoveryRadius", "raidArrivalRadius", "nestDefenseRadius",
+    "nestInteriorSpeed", "nestChamberArrivalRadius",
   ]) {
     if (config[key] <= 0) fail(key, "doit être positif");
   }
@@ -183,6 +188,9 @@ export function validateFlatConfig(config) {
   }
   if (!Number.isInteger(config.raidCooldownTicks) || config.raidCooldownTicks < 0) {
     fail("raidCooldownTicks", "entier positif ou nul attendu");
+  }
+  if (!Number.isInteger(config.nestTransitionCooldownTicks) || config.nestTransitionCooldownTicks < 0) {
+    fail("nestTransitionCooldownTicks", "entier positif ou nul attendu");
   }
   if (!Number.isInteger(config.seed)) fail("seed", "entier attendu");
   if (!Number.isInteger(config.territoryUpdateInterval)) {

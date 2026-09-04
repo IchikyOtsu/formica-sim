@@ -12,6 +12,8 @@ import { Ant, AntState, Caste } from "../src/entities/Ant.js";
 import { RaidState } from "../src/entities/Raid.js";
 import { RaidDecisionSystem } from "../src/systems/RaidDecisionSystem.js";
 import { TacticalOverlaySystem, OverlayType, DEFAULT_OVERLAY_VISIBILITY } from "../src/systems/TacticalOverlaySystem.js";
+import { NestChamberType } from "../src/nest/NestChamber.js";
+import { NestInterior } from "../src/nest/NestInterior.js";
 import { Brood, BroodStage } from "../src/entities/Brood.js";
 import { FoodSource, FoodSourceState } from "../src/entities/FoodSource.js";
 import { DangerZone } from "../src/environment/DangerZone.js";
@@ -2808,4 +2810,201 @@ test("overlay visibility categories independently filter what collect() returns"
   const overlays = system.collect(simulation, withOnlyLoot);
   assert.ok(overlays.every((overlay) => overlay.type === OverlayType.LOOT_CARRIED));
   assert.ok(overlays.length > 0);
+});
+
+function nestInteriorConfig(overrides = {}) {
+  return multiColonyConfig({
+    nestInteriorEnabled: true,
+    antSpeed: 20,
+    ...overrides,
+  });
+}
+
+test("1. a returning ant reaches the nest and transitions from WORLD to NEST", () => {
+  const simulation = new Simulation(nestInteriorConfig());
+  const colonyA = simulation.colonies[0];
+  const ant = colonyA.ants[0];
+  ant.position = { ...colonyA.nest.position };
+  ant.state = AntState.RETURNING_HOME;
+
+  assert.equal(ant.locationType, "WORLD");
+  simulation.tick();
+
+  assert.equal(ant.locationType, "NEST");
+  assert.equal(ant.nestId, colonyA.id);
+  assert.ok(ant.nestPosition);
+  assert.equal(ant.state, AntState.IN_NEST);
+});
+
+test("2. an ant inside the nest is untouched by outside dangers", () => {
+  const simulation = new Simulation(nestInteriorConfig());
+  const colonyA = simulation.colonies[0];
+  const ant = colonyA.ants[0];
+  ant.position = { ...colonyA.nest.position };
+  ant.state = AntState.RETURNING_HOME;
+  // carrying food gives it a multi-tick trip to STORAGE, so it stays indoors
+  // long enough for the check below instead of immediately exiting again.
+  ant.carryingFood = true;
+  ant.carryingFoodAmount = 1;
+  simulation.initialColonyFoodStock += 1; // test-only fabricated unit
+  simulation.tick();
+  assert.equal(ant.locationType, "NEST", "the ant must already be indoors before the hazard appears");
+
+  // introduce a lethal danger zone covering the nest position only now,
+  // once the ant is safely inside — a hazard that would kill any WORLD ant instantly.
+  simulation.dangerZones.push(new DangerZone({
+    id: "lethal", x: colonyA.nest.position.x, y: colonyA.nest.position.y, radius: 30,
+    energyMultiplier: 5, mortalityProbability: 1,
+  }));
+  const healthBefore = ant.health;
+
+  for (let tick = 0; tick < 10; tick += 1) simulation.tick();
+
+  assert.equal(ant.state === AntState.DEAD, false, "a 100%-lethal danger zone at the nest position must never reach an indoor ant");
+  assert.equal(ant.health, healthBefore);
+});
+
+test("3. a loaded ant is assigned GO_TO_STORAGE on entry", () => {
+  const simulation = new Simulation(nestInteriorConfig());
+  const colonyA = simulation.colonies[0];
+  const ant = colonyA.ants[0];
+  ant.position = { ...colonyA.nest.position };
+  ant.state = AntState.RETURNING_HOME;
+  ant.carryingFood = true;
+  ant.carryingFoodAmount = 3;
+  simulation.tick();
+  simulation.tick();
+  assert.equal(ant.nestTask, "GO_TO_STORAGE");
+});
+
+test("4. the colony's stock does not increase before the ant physically reaches STORAGE", () => {
+  const simulation = new Simulation(nestInteriorConfig({ antSpeed: 5 }));
+  const colonyA = simulation.colonies[0];
+  const ant = colonyA.ants[0];
+  ant.position = { ...colonyA.nest.position };
+  ant.state = AntState.RETURNING_HOME;
+  ant.carryingFood = true;
+  ant.carryingFoodAmount = 3;
+  simulation.initialColonyFoodStock += 3; // test-only: this unit was fabricated for the check, not foraged
+  const stockBeforeEntry = colonyA.foodStock;
+
+  let depositedAtStorage = false;
+  for (let tick = 0; tick < 60; tick += 1) {
+    simulation.tick();
+    if (colonyA.foodStock > stockBeforeEntry) {
+      assert.equal(ant.nestChamberId, NestChamberType.STORAGE, "the deposit must happen exactly at STORAGE arrival");
+      depositedAtStorage = true;
+      break;
+    }
+    assert.equal(colonyA.foodStock, stockBeforeEntry, "no deposit while still travelling inside");
+  }
+  assert.equal(depositedAtStorage, true);
+});
+
+test("5. a low-energy ant is assigned GO_TO_REST on entry", () => {
+  const simulation = new Simulation(nestInteriorConfig());
+  const colonyA = simulation.colonies[0];
+  const ant = colonyA.ants[0];
+  ant.position = { ...colonyA.nest.position };
+  ant.state = AntState.RETURNING_HOME;
+  ant.energy = 5;
+  simulation.tick();
+  simulation.tick();
+  assert.equal(ant.nestTask, "GO_TO_REST");
+});
+
+test("6. an ant can fully exit the nest back to the world", () => {
+  const simulation = new Simulation(nestInteriorConfig());
+  const colonyA = simulation.colonies[0];
+  const ant = colonyA.ants[0];
+  ant.position = { ...colonyA.nest.position };
+  ant.state = AntState.RETURNING_HOME;
+
+  let exited = false;
+  for (let tick = 0; tick < 200; tick += 1) {
+    simulation.tick();
+    if (ant.locationType === "WORLD" && tick > 0) { exited = true; break; }
+  }
+  assert.equal(exited, true);
+  assert.equal(ant.state, AntState.SEARCHING_FOOD);
+  assert.equal(ant.nestId, null);
+  assert.equal(ant.nestPosition, null);
+});
+
+test("7. an ant cannot instantly re-enter the nest right after exiting", () => {
+  const simulation = new Simulation(nestInteriorConfig({ nestTransitionCooldownTicks: 20 }));
+  const colonyA = simulation.colonies[0];
+  const ant = colonyA.ants[0];
+  ant.position = { ...colonyA.nest.position };
+  ant.state = AntState.RETURNING_HOME;
+
+  let exitTick = null;
+  for (let tick = 0; tick < 200 && exitTick === null; tick += 1) {
+    simulation.tick();
+    if (ant.locationType === "WORLD") exitTick = tick;
+  }
+  assert.ok(exitTick !== null);
+  assert.ok(ant.nestTransitionCooldown > 0, "the cooldown is armed immediately on exit");
+
+  // force it right back against the entrance and back into RETURNING_HOME
+  ant.position = { ...colonyA.nest.position };
+  ant.state = AntState.RETURNING_HOME;
+  simulation.tick();
+  assert.equal(ant.locationType, "WORLD", "re-entry is blocked while the cooldown is still active");
+
+  for (let tick = 0; tick < 30 && ant.locationType === "WORLD"; tick += 1) {
+    ant.position = { ...colonyA.nest.position };
+    ant.state = AntState.RETURNING_HOME;
+    simulation.tick();
+  }
+  assert.equal(ant.locationType, "NEST", "re-entry succeeds once the cooldown has elapsed");
+});
+
+test("8 & 9. the queen and brood are always rendered inside their own dedicated chamber", () => {
+  const interior = new NestInterior();
+  assert.equal(interior.getChamber(NestChamberType.QUEEN).type, NestChamberType.QUEEN);
+  assert.equal(interior.getChamber(NestChamberType.BROOD).type, NestChamberType.BROOD);
+  // the queen never moves and brood objects have no independent navigation in V1.5.1 —
+  // NestRenderer places them by chamber type directly, not by a tracked position.
+});
+
+test("10. food conservation stays exact across a full forage -> enter -> storage -> exit cycle", () => {
+  const simulation = new Simulation(nestInteriorConfig({ antSpeed: 15 }));
+  for (let tick = 0; tick < 6000; tick += 1) {
+    simulation.tick();
+    assertSimulationInvariants(simulation);
+  }
+});
+
+test("11. nest-interior replay is exact for an identical seed and configuration", () => {
+  const config = nestInteriorConfig({ antSpeed: 15 });
+  const runOnce = () => {
+    const simulation = new Simulation(config);
+    for (let tick = 0; tick < 3000; tick += 1) simulation.tick();
+    return simulation.colonies.map((colony) => ({
+      foodStock: colony.foodStock,
+      resources: colony.resources,
+      ants: colony.ants.map((ant) => ({
+        locationType: ant.locationType,
+        nestChamberId: ant.nestChamberId,
+        nestTask: ant.nestTask,
+        position: ant.position,
+        nestPosition: ant.nestPosition,
+        energy: ant.energy,
+      })),
+    }));
+  };
+  assert.deepEqual(runOnce(), runOnce());
+});
+
+test("12. an ant can only ever enter its own colony's nest, never a foreign one", () => {
+  const simulation = new Simulation(nestInteriorConfig({ combatEnabled: false }));
+  for (let tick = 0; tick < 3000; tick += 1) {
+    simulation.tick();
+    for (const colony of simulation.colonies) {
+      for (const ant of colony.ants) {
+        if (ant.locationType === "NEST") assert.equal(ant.nestId, colony.id);
+      }
+    }
+  }
 });

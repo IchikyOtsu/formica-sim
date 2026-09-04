@@ -28,6 +28,11 @@ import { EncounterReactionSystem, EncounterReaction } from "../systems/Encounter
 import { RaidSystem } from "../systems/RaidSystem.js";
 import { RaidState } from "../entities/Raid.js";
 import { RaidDecisionSystem } from "../systems/RaidDecisionSystem.js";
+import { NestInterior } from "../nest/NestInterior.js";
+import { NestChamberType } from "../nest/NestChamber.js";
+import { NestTask } from "../nest/NestTask.js";
+import { NestNavigationSystem } from "../nest/NestNavigationSystem.js";
+import { NestTransitionSystem } from "../nest/NestTransitionSystem.js";
 import { normalizeConfig, toVersionedConfig } from "../config/ConfigSchema.js";
 import { DEFAULT_CONFIG } from "./SimulationConfig.js";
 import { ColonyPheromoneFields } from "./ColonyPheromoneFields.js";
@@ -77,6 +82,8 @@ export class Simulation {
     this.encounterReaction = new EncounterReactionSystem();
     this.raidSystem = new RaidSystem();
     this.raidDecisionSystem = new RaidDecisionSystem();
+    this.nestNavigationSystem = new NestNavigationSystem();
+    this.nestTransitionSystem = new NestTransitionSystem();
     this.reset();
   }
 
@@ -142,6 +149,7 @@ export class Simulation {
     });
     this.colony = this.colonies[0];
     this.pheromoneField = this.colonyPheromones.get(this.colony.id);
+    this.nestInteriors = new Map(this.colonies.map((colony) => [colony.id, new NestInterior()]));
     this.broodSystems = new Map(this.colonies.map((colony) => [colony.id, new BroodSystem()]));
     this.broodSystem = this.broodSystems.get(this.colony.id);
     this.territoryMap = new TerritoryMap(
@@ -305,7 +313,12 @@ export class Simulation {
       this.evaluateAutoRaid(colony, colonyConfig);
       for (const ant of colony.ants) {
       if (ant.state === AntState.DEAD) continue;
+      if (ant.locationType === "NEST") {
+        this.updateNestAnt(ant, colony, colonyConfig, deltaSeconds);
+        continue;
+      }
       if (this.config.combatEnabled && ant.combatCooldown > 0) ant.combatCooldown -= 1;
+      if (ant.nestTransitionCooldown > 0) ant.nestTransitionCooldown -= 1;
 
       if (ant.state === AntState.RESTING) {
         ant.age += deltaSeconds;
@@ -440,7 +453,7 @@ export class Simulation {
         if (colonyConfig.pheromonesEnabled) {
           this.depositTrail(ant);
         }
-        if (this.foodCollection.deposit(ant, colony)) {
+        if (!colonyConfig.nestInteriorEnabled && this.foodCollection.deposit(ant, colony)) {
           this.completedReturns += 1;
           this.totalReturnTicks += this.tickCount - ant.returnStartedTick;
           this.totalDetourDistance += Math.max(0, ant.returnDistance - ant.directReturnDistance);
@@ -449,15 +462,21 @@ export class Simulation {
           ant.directReturnDistance = 0;
         }
         if (this.homeDetection.isInside(ant, colony.nest)) {
-          if (ant.raidCargo > 0) this.depositLoot(ant, colony);
-          if (ant.raidId) this.resolveRaidMemberOutcome(ant, colony, "RETURNED");
-          if (this.metabolism.needsFood(ant)) {
-            this.metabolism.feedAtNest(
-              ant,
-              colony,
-              colonyConfig.foodEnergyValue,
-              colonyConfig.resumeEnergyThreshold,
-            );
+          if (colonyConfig.nestInteriorEnabled) {
+            if (ant.nestTransitionCooldown <= 0) {
+              this.nestTransitionSystem.enter(ant, colony, this.nestInteriors.get(colony.id));
+            }
+          } else {
+            if (ant.raidCargo > 0) this.depositLoot(ant, colony);
+            if (ant.raidId) this.resolveRaidMemberOutcome(ant, colony, "RETURNED");
+            if (this.metabolism.needsFood(ant)) {
+              this.metabolism.feedAtNest(
+                ant,
+                colony,
+                colonyConfig.foodEnergyValue,
+                colonyConfig.resumeEnergyThreshold,
+              );
+            }
           }
         }
       } else if (ant.state === AntState.RAIDING) {
@@ -607,6 +626,14 @@ export class Simulation {
     ant.returnReason = null;
     if (ant.raidCargo > 0) this.dropLoot(ant, colony);
     if (ant.raidId) this.resolveRaidMemberOutcome(ant, colony, "DEAD");
+    if (ant.locationType === "NEST") {
+      this.nestInteriors.get(colony.id)?.removeAnt(ant);
+      ant.locationType = "WORLD";
+      ant.nestId = null;
+      ant.nestPosition = null;
+      ant.nestChamberId = null;
+      ant.nestTask = "NONE";
+    }
   }
 
   detectEnemyNests(colony, colonyConfig) {
@@ -614,7 +641,7 @@ export class Simulation {
     const radius = colonyConfig.nestDiscoveryRadius;
     const radiusSquared = radius * radius;
     for (const ant of colony.ants) {
-      if (ant.state === AntState.DEAD) continue;
+      if (ant.state === AntState.DEAD || ant.locationType === "NEST") continue;
       for (const other of this.colonies) {
         if (other.id === colony.id) continue;
         const dx = other.nest.position.x - ant.position.x;
@@ -637,7 +664,7 @@ export class Simulation {
     for (const other of this.colonies) {
       if (other.id === colony.id) continue;
       for (const ant of other.ants) {
-        if (ant.state === AntState.DEAD) continue;
+        if (ant.state === AntState.DEAD || ant.locationType === "NEST") continue;
         const dx = ant.position.x - colony.nest.position.x;
         const dy = ant.position.y - colony.nest.position.y;
         if (dx * dx + dy * dy <= radiusSquared) currentIds.add(ant.id);
@@ -675,7 +702,7 @@ export class Simulation {
     if (colony.nestUnderThreat) {
       const zone = this.workersSeenInDefenseZone.get(colony.id) ?? new Set();
       for (const ant of colony.ants) {
-        if (ant.state === AntState.DEAD || ant.caste !== Caste.WORKER) continue;
+        if (ant.state === AntState.DEAD || ant.caste !== Caste.WORKER || ant.locationType === "NEST") continue;
         const dx = ant.position.x - colony.nest.position.x;
         const dy = ant.position.y - colony.nest.position.y;
         if (dx * dx + dy * dy <= radiusSquared) zone.add(ant.id);
@@ -750,6 +777,100 @@ export class Simulation {
     const dy = targetPosition.y - ant.position.y;
     ant.direction = Math.atan2(dy, dx);
     return Math.hypot(dx, dy);
+  }
+
+  updateNestAnt(ant, colony, colonyConfig, deltaSeconds) {
+    const interior = this.nestInteriors.get(colony.id);
+    ant.age += deltaSeconds;
+    if (ant.nestTransitionCooldown > 0) ant.nestTransitionCooldown -= 1;
+    if (this.config.combatEnabled && ant.combatCooldown > 0) ant.combatCooldown -= 1;
+
+    if (this.metabolism.consumeEnergy(
+      ant,
+      0,
+      deltaSeconds,
+      colonyConfig.carryingEnergyMultiplier,
+      this.basalRateFor(ant, colonyConfig),
+      1,
+      1,
+    )) {
+      this.handleDeath(ant, "STARVATION", colony);
+      return;
+    }
+
+    if (ant.state === AntState.RESTING) {
+      this.metabolism.feedAtNest(ant, colony, colonyConfig.foodEnergyValue, colonyConfig.resumeEnergyThreshold);
+      if (ant.state === AntState.RESTING) return;
+      ant.state = AntState.IN_NEST;
+      ant.nestTask = NestTask.EXIT_NEST;
+      return;
+    }
+
+    if (ant.nestTask === NestTask.NONE) this.assignNestTask(ant, colony);
+
+    const targetType = this.chamberTypeForTask(ant.nestTask);
+    const chamber = interior.getChamber(targetType);
+    const arrived = this.nestNavigationSystem.moveToward(
+      ant,
+      chamber.position,
+      colonyConfig.nestInteriorSpeed,
+      deltaSeconds,
+      colonyConfig.nestChamberArrivalRadius,
+    );
+    if (!arrived) return;
+    interior.moveAntToChamber(ant, targetType);
+
+    if (targetType === NestChamberType.STORAGE) {
+      this.depositAtStorage(ant, colony);
+      ant.state = AntState.IN_NEST;
+      ant.nestTask = this.metabolism.needsFood(ant) ? NestTask.GO_TO_REST : NestTask.EXIT_NEST;
+    } else if (targetType === NestChamberType.REST) {
+      ant.state = AntState.RESTING;
+      this.metabolism.feedAtNest(ant, colony, colonyConfig.foodEnergyValue, colonyConfig.resumeEnergyThreshold);
+      if (ant.state !== AntState.RESTING) {
+        ant.state = AntState.IN_NEST;
+        ant.nestTask = NestTask.EXIT_NEST;
+      }
+    } else if (targetType === NestChamberType.ENTRANCE) {
+      this.nestTransitionSystem.exit(ant, colony, interior, colonyConfig, this.birthRandom);
+    }
+  }
+
+  assignNestTask(ant, colony) {
+    if (ant.carryingFood || ant.raidCargo > 0) {
+      ant.nestTask = NestTask.GO_TO_STORAGE;
+    } else if (this.metabolism.needsFood(ant)) {
+      ant.nestTask = NestTask.GO_TO_REST;
+    } else {
+      ant.nestTask = NestTask.EXIT_NEST;
+    }
+  }
+
+  chamberTypeForTask(task) {
+    switch (task) {
+      case NestTask.GO_TO_STORAGE: return NestChamberType.STORAGE;
+      case NestTask.GO_TO_REST: return NestChamberType.REST;
+      case NestTask.GO_TO_BROOD: return NestChamberType.BROOD;
+      default: return NestChamberType.ENTRANCE;
+    }
+  }
+
+  depositAtStorage(ant, colony) {
+    if (ant.carryingFood) {
+      colony.depositFood(ant.carryingFoodAmount);
+      this.completedReturns += 1;
+      if (ant.returnStartedTick !== null) {
+        this.totalReturnTicks += this.tickCount - ant.returnStartedTick;
+        this.totalDetourDistance += Math.max(0, ant.returnDistance - ant.directReturnDistance);
+      }
+      ant.carryingFood = false;
+      ant.carryingFoodAmount = 0;
+      ant.returnStartedTick = null;
+      ant.returnDistance = 0;
+      ant.directReturnDistance = 0;
+    }
+    if (ant.raidCargo > 0) this.depositLoot(ant, colony);
+    if (ant.raidId) this.resolveRaidMemberOutcome(ant, colony, "RETURNED");
   }
 
   updateRaidTravel(ant, colony) {
@@ -1429,6 +1550,10 @@ export class Simulation {
       raidersReturnedWithLoot: colony.raidersReturnedWithLoot,
       raidersKilledWithLoot: colony.raidersKilledWithLoot,
       raidCargoInTransit: colony.ants.reduce((sum, ant) => sum + ant.raidCargo, 0),
+      antsOutside: livingAnts.filter((ant) => ant.locationType !== "NEST").length,
+      antsInsideNest: livingAnts.filter((ant) => ant.locationType === "NEST").length,
+      antsInStorage: livingAnts.filter((ant) => ant.nestChamberId === NestChamberType.STORAGE).length,
+      antsInBroodChamber: livingAnts.filter((ant) => ant.nestChamberId === NestChamberType.BROOD).length,
       foodPheromones,
       homePheromones,
       alarmPheromones,
