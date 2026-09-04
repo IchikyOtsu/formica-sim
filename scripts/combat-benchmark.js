@@ -31,6 +31,11 @@ const PROFILES = {
       combatThreatenThreshold: 0.35,
       combatAttackThreshold: 0.55,
       combatFleeHealthRatio: 0.35,
+      // Calibration V1.2 étape 3 : bonus contextuel (alliés/territoire) et
+      // cooldown raccourci quand il combat en position favorable.
+      combatNumbersAdvantageWeight: 0.45,
+      combatTerritorialAdvantageWeight: 0.45,
+      combatAttackCooldownTicks: 4,
     },
   },
   aggressive: {
@@ -39,7 +44,11 @@ const PROFILES = {
       encounterAvoidanceThreshold: 0.75,
       combatThreatenThreshold: 0.15,
       combatAttackThreshold: 0.25,
-      combatFleeHealthRatio: 0.12,
+      // Calibration V1.2 étape 3 : attaquer coûte plus cher (énergie + cooldown)
+      // et l'acharnement à faible santé est un peu plus limité.
+      combatFleeHealthRatio: 0.22,
+      combatAttackEnergyCost: 10,
+      combatAttackCooldownTicks: 8,
     },
   },
 };
