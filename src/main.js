@@ -5,7 +5,7 @@ import { createRunExport, downloadText, seriesToCsv } from "./observability/RunE
 import { TimeSeriesRenderer } from "./observability/TimeSeriesRenderer.js";
 import { evaluatePauseConditions } from "./observability/PauseConditions.js";
 import { SCENARIO_PRESETS, configForPreset } from "./experiments/ScenarioPresets.js";
-import { analyticsConfigFrom, toVersionedConfig } from "./config/ConfigSchema.js";
+import { analyticsConfigFrom, toVersionedConfig, CONFIG_SECTIONS } from "./config/ConfigSchema.js";
 import { Renderer } from "./rendering/Renderer.js";
 import { Simulation } from "./simulation/Simulation.js";
 import { DEFAULT_CONFIG } from "./simulation/SimulationConfig.js";
@@ -212,7 +212,14 @@ function renderColonyMetrics(colonies) {
       ["Part ressources", `${(colony.resourceShare * 100).toFixed(1)} %`],
       ["Territoire", `${colony.territoryCells} cellules`],
       ["Contacts", colony.foreignContacts],
+      ["Évitements", colony.avoidedContacts],
       ["Distance au nid", colony.averageNestDistance.toFixed(1)],
+      ["Ouvrières / Soldats", `${colony.workerCount} / ${colony.soldierCount}`],
+      ["Menace (threatPressure)", colony.threatPressure.toFixed(1)],
+      ["Combats · attaques", `${colony.fights} · ${colony.attacks}`],
+      ["Kills (ouvr. / sold.)", `${colony.workerKills} / ${colony.soldierKills}`],
+      ["Pertes combat (ouvr. / sold.)", `${colony.workerLosses} / ${colony.soldierLosses}`],
+      ["Coût militaire", colony.militaryFoodCost.toFixed(1)],
     ];
     for (const [label, value] of rows) {
       const term = document.createElement("dt");
@@ -332,16 +339,26 @@ document.querySelector("#territory-layer").addEventListener("change", (event) =>
   renderer.setTerritoryMode(event.target.value);
 });
 
+// Un preset comme "Combat équilibré V1.2" fixe des seuils de combat/castes
+// différents par colonie ; ces clés priment sur la config globale. Le
+// formulaire ne propose que des réglages symétriques, donc on les retire des
+// colonies au moment d'appliquer pour que les curseurs aient un effet visible.
+const COLONY_OVERRIDE_KEYS_TO_RESET = [...CONFIG_SECTIONS.combat, ...CONFIG_SECTIONS.castes];
+
 document.querySelector("#parameters-form").addEventListener("submit", (event) => {
   event.preventDefault();
   simulation.reconfigure({
     ...simulation.config,
     initialAnts: Number(document.querySelector("#param-ants").value),
-    colonies: simulation.config.colonies?.map((colony) => ({
-      ...colony,
-      initialAnts: Number(document.querySelector("#param-ants").value),
-      initialFoodStock: Number(document.querySelector("#param-initial-stock").value),
-    })) ?? null,
+    colonies: simulation.config.colonies?.map((colony) => {
+      const stripped = { ...colony };
+      for (const key of COLONY_OVERRIDE_KEYS_TO_RESET) delete stripped[key];
+      return {
+        ...stripped,
+        initialAnts: Number(document.querySelector("#param-ants").value),
+        initialFoodStock: Number(document.querySelector("#param-initial-stock").value),
+      };
+    }) ?? null,
     pheromoneEvaporationRate: Number(document.querySelector("#param-evaporation").value),
     pheromoneDiffusionRate: Number(document.querySelector("#param-diffusion").value),
     foodDepositStrength: Number(document.querySelector("#param-food-deposit").value),
@@ -369,6 +386,19 @@ document.querySelector("#parameters-form").addEventListener("submit", (event) =>
     alarmPheromonesEnabled: document.querySelector("#param-alarm").checked,
     alarmInfluence: Number(document.querySelector("#param-alarm-influence").value),
     alarmEvaporationRate: Number(document.querySelector("#param-alarm-evaporation").value),
+    combatEnabled: document.querySelector("#param-combat-enabled").checked,
+    combatRadius: Number(document.querySelector("#param-combat-radius").value),
+    combatAttackPower: Number(document.querySelector("#param-combat-attack-power").value),
+    combatAttackEnergyCost: Number(document.querySelector("#param-combat-attack-energy-cost").value),
+    combatAttackCooldownTicks: Number(document.querySelector("#param-combat-attack-cooldown").value),
+    combatAttackThreshold: Number(document.querySelector("#param-combat-attack-threshold").value),
+    combatThreatenThreshold: Number(document.querySelector("#param-combat-threaten-threshold").value),
+    combatFleeHealthRatio: Number(document.querySelector("#param-combat-flee-health-ratio").value),
+    encounterAvoidanceThreshold: Number(document.querySelector("#param-encounter-avoidance-threshold").value),
+    castesEnabled: document.querySelector("#param-castes-enabled").checked,
+    casteSoldierRatioCap: Number(document.querySelector("#param-caste-ratio-cap").value),
+    casteStockThreshold: Number(document.querySelector("#param-caste-stock-threshold").value),
+    threatPressureRatioScale: Number(document.querySelector("#param-threat-pressure-scale").value),
   });
   resetAnalytics();
   accumulator = 0;
@@ -408,6 +438,17 @@ function applyConfigToForm(config) {
     "#param-respawn-delay": config.foodRespawnDelayTicks,
     "#param-alarm-influence": config.alarmInfluence,
     "#param-alarm-evaporation": config.alarmEvaporationRate,
+    "#param-combat-radius": config.combatRadius,
+    "#param-combat-attack-power": config.combatAttackPower,
+    "#param-combat-attack-energy-cost": config.combatAttackEnergyCost,
+    "#param-combat-attack-cooldown": config.combatAttackCooldownTicks,
+    "#param-combat-attack-threshold": config.combatAttackThreshold,
+    "#param-combat-threaten-threshold": config.combatThreatenThreshold,
+    "#param-combat-flee-health-ratio": config.combatFleeHealthRatio,
+    "#param-encounter-avoidance-threshold": config.encounterAvoidanceThreshold,
+    "#param-caste-ratio-cap": config.casteSoldierRatioCap,
+    "#param-caste-stock-threshold": config.casteStockThreshold,
+    "#param-threat-pressure-scale": config.threatPressureRatioScale,
   };
   for (const [selector, value] of Object.entries(values)) {
     document.querySelector(selector).value = value;
@@ -415,6 +456,8 @@ function applyConfigToForm(config) {
   document.querySelector("#param-reproduction").checked = config.reproductionEnabled;
   document.querySelector("#param-environment").checked = config.environmentEnabled;
   document.querySelector("#param-alarm").checked = config.alarmPheromonesEnabled;
+  document.querySelector("#param-combat-enabled").checked = config.combatEnabled;
+  document.querySelector("#param-castes-enabled").checked = config.castesEnabled;
 }
 
 function loadConfiguration(config) {

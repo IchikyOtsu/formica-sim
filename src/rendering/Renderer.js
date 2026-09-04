@@ -1,5 +1,5 @@
 import { PheromoneType } from "../simulation/PheromoneField.js";
-import { AntState } from "../entities/Ant.js";
+import { AntState, Caste } from "../entities/Ant.js";
 import { BroodStage } from "../entities/Brood.js";
 import { TerritoryState } from "../simulation/TerritoryMap.js";
 
@@ -248,13 +248,15 @@ export class Renderer {
       ctx.restore();
       return;
     }
+    const isSoldier = ant.caste === Caste.SOLDIER;
+    const scale = isSoldier ? 1.25 : 1;
     ctx.rotate(ant.direction);
     const colonyRgb = colorToRgb(colonyColor);
     ctx.strokeStyle = `rgba(${colonyRgb.join(", ")}, 0.66)`;
-    ctx.lineWidth = 0.8;
+    ctx.lineWidth = isSoldier ? 1.1 : 0.8;
     for (const side of [-1, 1]) {
-      ctx.beginPath(); ctx.moveTo(-1, side); ctx.lineTo(-5, side * 4); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(1, side); ctx.lineTo(4, side * 4); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(-1 * scale, side * scale); ctx.lineTo(-5 * scale, side * 4 * scale); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(1 * scale, side * scale); ctx.lineTo(4 * scale, side * 4 * scale); ctx.stroke();
     }
     if (ant.carryingFood) {
       ctx.fillStyle = "rgba(164, 195, 100, 0.18)";
@@ -263,12 +265,33 @@ export class Renderer {
     ctx.fillStyle = ant.state === AntState.RESTING
       ? "#79a8c8"
       : ant.carryingFood ? "#d8cb78" : colonyColor;
-    ctx.beginPath(); ctx.ellipse(-2.5, 0, 3, 2.2, 0, 0, Math.PI * 2); ctx.fill();
-    ctx.beginPath(); ctx.arc(2.5, 0, 1.9, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(-2.5 * scale, 0, 3 * scale, 2.2 * scale, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(2.5 * scale, 0, 1.9 * scale, 0, Math.PI * 2); ctx.fill();
+    if (isSoldier) {
+      // Marque martiale : liseré sombre sur le thorax, pour distinguer un
+      // soldat d'une ouvrière au premier coup d'œil.
+      ctx.strokeStyle = "rgba(60, 20, 20, 0.85)";
+      ctx.lineWidth = 0.9;
+      ctx.beginPath(); ctx.ellipse(-2.5 * scale, 0, 3 * scale, 2.2 * scale, 0, 0, Math.PI * 2); ctx.stroke();
+    }
     if (ant.carryingFood) {
       ctx.fillStyle = "#a4c364";
       ctx.beginPath(); ctx.arc(-5.5, 0, 1.8, 0, Math.PI * 2); ctx.fill();
     }
+    ctx.restore();
+    if (ant.health < ant.maxHealth) this.drawHealthBar(ctx, ant);
+  }
+
+  drawHealthBar(ctx, ant) {
+    const ratio = Math.max(0, ant.health / ant.maxHealth);
+    const width = 7;
+    const x = ant.position.x - width / 2;
+    const y = ant.position.y - 7;
+    ctx.save();
+    ctx.fillStyle = "rgba(20, 16, 12, 0.75)";
+    ctx.fillRect(x, y, width, 1.6);
+    ctx.fillStyle = ratio > 0.5 ? "#8fbf5a" : ratio > 0.25 ? "#d9a441" : "#c0453f";
+    ctx.fillRect(x, y, width * ratio, 1.6);
     ctx.restore();
   }
 }
