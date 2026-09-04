@@ -126,6 +126,7 @@ canvas { display: block; width: 100%; aspect-ratio: 800 / 520; max-height: calc(
 .parameters .check-label { display: flex; align-self: end; align-items: center; justify-content: space-between; height: 32px; padding: 0 9px; border: 1px solid var(--line); background: #20251d; }
 .parameters .check-label input { width: 14px; height: 14px; margin: 0; accent-color: var(--accent); }
 .parameters button { align-self: end; height: 32px; color: #201b12; border: 0; border-radius: 2px; background: var(--accent); cursor: pointer; font: 600 9px "DM Mono", monospace; letter-spacing: .06em; text-transform: uppercase; }
+.parameters .field-hint { grid-column: 1 / -1; margin: -4px 0 0; color: #7a8170; font: 9px/1.4 "DM Mono", monospace; }
 .analysis-panel { padding: 20px 18px; border-top: 1px solid var(--line); background: #141812; }
 .analysis-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 18px; }
 .analysis-heading h2 { margin: 0; font: 600 14px "DM Mono", monospace; letter-spacing: .1em; }
