@@ -1,4 +1,5 @@
 import { Brood, BroodStage } from "../entities/Brood.js";
+import { AntState } from "../entities/Ant.js";
 
 export class BroodSystem {
   constructor() {
@@ -7,23 +8,28 @@ export class BroodSystem {
     this.layingFoodConsumed = 0;
   }
 
-  update(colony, config) {
+  update(colony, config, developmentMultiplier = 1) {
     if (!config.reproductionEnabled) return 0;
     const emerged = [];
     for (const brood of colony.brood) {
       brood.age += 1;
       if (brood.stage === BroodStage.EGG) {
-        this.advanceFreeStage(brood, config.eggDurationTicks, BroodStage.LARVA);
+        this.advanceFreeStage(brood, config.eggDurationTicks, BroodStage.LARVA, developmentMultiplier);
       } else if (brood.stage === BroodStage.LARVA) {
         const needed = config.larvaFoodPerTick;
         const consumed = colony.consumeFood(needed);
         brood.foodConsumed += consumed;
         this.broodFoodConsumed += consumed;
         if (consumed + Number.EPSILON >= needed) {
-          this.advanceFreeStage(brood, config.larvaDurationTicks, BroodStage.PUPA);
+          this.advanceFreeStage(
+            brood,
+            config.larvaDurationTicks,
+            BroodStage.PUPA,
+            developmentMultiplier,
+          );
         }
       } else if (brood.stage === BroodStage.PUPA) {
-        brood.stageAge += 1;
+        brood.stageAge += developmentMultiplier;
         brood.developmentProgress = Math.min(1, brood.stageAge / config.pupaDurationTicks);
         if (brood.stageAge >= config.pupaDurationTicks) emerged.push(brood);
       }
@@ -34,9 +40,11 @@ export class BroodSystem {
     }
 
     const queen = colony.queen;
+    const livingWorkers = colony.ants.filter((ant) => ant.state !== AntState.DEAD).length;
     queen.cooldownRemaining = Math.max(0, queen.cooldownRemaining - 1);
     if (queen.cooldownRemaining === 0
       && colony.brood.length < config.maxBrood
+      && livingWorkers + colony.brood.length < (config.maxWorkers ?? Infinity)
       && colony.foodStock >= config.reproductionFoodThreshold
       && colony.foodStock >= config.eggFoodCost) {
       const consumed = colony.consumeFood(config.eggFoodCost);
@@ -51,8 +59,8 @@ export class BroodSystem {
     return emerged.length;
   }
 
-  advanceFreeStage(brood, duration, nextStage) {
-    brood.stageAge += 1;
+  advanceFreeStage(brood, duration, nextStage, developmentMultiplier = 1) {
+    brood.stageAge += developmentMultiplier;
     brood.developmentProgress = Math.min(1, brood.stageAge / duration);
     if (brood.stageAge < duration) return;
     brood.stage = nextStage;

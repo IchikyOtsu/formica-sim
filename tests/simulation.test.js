@@ -4,13 +4,18 @@ import { SearchFoodBehavior } from "../src/behaviors/SearchFoodBehavior.js";
 import { ReturnHomeBehavior } from "../src/behaviors/ReturnHomeBehavior.js";
 import { Ant, AntState } from "../src/entities/Ant.js";
 import { Brood, BroodStage } from "../src/entities/Brood.js";
-import { FoodSource } from "../src/entities/FoodSource.js";
+import { FoodSource, FoodSourceState } from "../src/entities/FoodSource.js";
+import { DangerZone } from "../src/environment/DangerZone.js";
+import { Season } from "../src/environment/Season.js";
 import { PheromoneField, PheromoneType } from "../src/simulation/PheromoneField.js";
 import { Renderer } from "../src/rendering/Renderer.js";
 import { Simulation } from "../src/simulation/Simulation.js";
 import { DEFAULT_CONFIG } from "../src/simulation/SimulationConfig.js";
 import { World } from "../src/simulation/World.js";
 import { FoodDetectionSystem } from "../src/systems/FoodDetectionSystem.js";
+import { EnvironmentSystem } from "../src/systems/EnvironmentSystem.js";
+import { FoodSpawnSystem } from "../src/systems/FoodSpawnSystem.js";
+import { HazardSystem } from "../src/systems/HazardSystem.js";
 import { HomeDetectionSystem } from "../src/systems/HomeDetectionSystem.js";
 import { PheromoneDepositSystem } from "../src/systems/PheromoneDepositSystem.js";
 import { PheromoneSensingSystem } from "../src/systems/PheromoneSensingSystem.js";
@@ -24,6 +29,8 @@ function foragingConfig(overrides = {}) {
     tickDurationMs: 100,
     initialAnts: 1,
     antSpeed: 20,
+    environmentEnabled: false,
+    foodRegenerationRate: 0,
     foodDetectionRadius: 30,
     nest: { x: 15, y: 40, radius: 6 },
     foodSources: [{ x: 70, y: 40, quantity: 2, radius: 5 }],
@@ -47,7 +54,9 @@ test("advances time and keeps every ant inside the world", () => {
     assert.equal(simulation.world.contains(ant.position), true);
   }
   const metrics = simulation.getMetrics();
-  assert.equal(metrics.resources + metrics.foodRemaining + metrics.carryingAnts, 240);
+  assert.ok(metrics.resources > 0);
+  assert.ok(metrics.foodSources <= simulation.config.maxActiveSources);
+  assert.equal(metrics.season, "SUMMER");
 });
 
 test("reset restores a deterministic initial state", () => {
@@ -354,6 +363,8 @@ test("all four benchmark modes complete and V0.4 returns without GPS", () => {
     const simulation = new Simulation({
       ...DEFAULT_CONFIG,
       reproductionEnabled: false,
+      environmentEnabled: false,
+      foodRegenerationRate: 0,
       ...overrides,
     });
     while (simulation.completionTick === null && simulation.tickCount < 30_000) {
@@ -725,4 +736,149 @@ test("aggressive reproduction can cause a boom followed by famine and contractio
   assert.ok(metrics.maxPopulation > metrics.totalPopulation);
   assert.equal(metrics.foodStock, 0);
   assert.ok(metrics.netGrowth < metrics.births);
+});
+
+test("environment cycles deterministically through four seasons", () => {
+  const system = new EnvironmentSystem();
+  const config = { environmentEnabled: true, seasonDurationTicks: 10, environmentSeverity: 1 };
+  assert.equal(system.getState(0, config).season, Season.SPRING);
+  assert.equal(system.getState(10, config).season, Season.SUMMER);
+  assert.equal(system.getState(20, config).season, Season.AUTUMN);
+  assert.equal(system.getState(30, config).season, Season.WINTER);
+  assert.equal(system.getState(40, config).season, Season.SPRING);
+  assert.equal(system.getState(40, config).cycle, 1);
+  assert.ok(system.getState(30, config).metabolismMultiplier > 1);
+  assert.ok(system.getState(30, config).foodRegenerationMultiplier < 1);
+});
+
+test("a depleted food source cools down and respawns elsewhere", () => {
+  const source = new FoodSource({ id: "F", x: 5, y: 5, quantity: 1, radius: 2 });
+  source.take(1);
+  assert.equal(source.state, FoodSourceState.DEPLETED);
+  const system = new FoodSpawnSystem(() => 0.5);
+  const config = {
+    foodRegenerationRate: 0,
+    foodSourceLifetimeTicks: 100,
+    foodRespawnDelayTicks: 2,
+    foodSpawnProbability: 1,
+    maxActiveSources: 1,
+    foodSpawnMargin: 10,
+    foodMinQuantity: 4,
+    foodMaxQuantity: 8,
+    foodSourceRadius: 3,
+  };
+  const world = new World(100, 80);
+  system.update([source], world, config, 1);
+  assert.equal(source.state, FoodSourceState.COOLDOWN);
+  system.update([source], world, config, 1);
+  system.update([source], world, config, 1);
+  assert.equal(source.state, FoodSourceState.SPAWN);
+  assert.deepEqual(source.position, { x: 50, y: 40 });
+  assert.equal(source.quantity, 6);
+  system.update([source], world, config, 1);
+  assert.equal(source.state, FoodSourceState.ACTIVE);
+});
+
+test("dynamic worlds enforce the active source ceiling from reset", () => {
+  const simulation = new Simulation({
+    ...DEFAULT_CONFIG,
+    maxActiveSources: 2,
+    dangerZones: [],
+  });
+  assert.equal(simulation.foodSources.length, 2);
+  for (let index = 0; index < 100; index += 1) simulation.tick();
+  assert.ok(simulation.getMetrics().foodSources <= 2);
+});
+
+test("danger zones increase movement cost and can cause environmental death", () => {
+  const zone = new DangerZone({
+    id: "D",
+    x: 10,
+    y: 10,
+    radius: 5,
+    energyMultiplier: 3,
+    mortalityProbability: 0.5,
+  });
+  const hazard = new HazardSystem();
+  const ant = new Ant({
+    id: "AT-RISK",
+    position: { x: 10, y: 10 },
+    direction: 0,
+    speed: 1,
+    colonyId: "C-01",
+  });
+  assert.equal(hazard.movementMultiplier(ant.position, [zone]), 3);
+  assert.equal(hazard.movementMultiplier({ x: 30, y: 30 }, [zone]), 1);
+  assert.equal(hazard.applyMortality(ant, [zone], 1, () => 0.25), true);
+  assert.equal(ant.state, AntState.DEAD);
+});
+
+test("winter slows brood development without seasonal queen decisions", () => {
+  const simulation = new Simulation(foragingConfig({
+    initialFoodStock: 10,
+    maxBrood: 1,
+    reproductionFoodThreshold: 100,
+    eggDurationTicks: 10,
+  }));
+  const brood = new Brood({ id: "WINTER-EGG" });
+  simulation.colony.brood.push(brood);
+  simulation.broodSystem.update(simulation.colony, simulation.config, 0.4);
+  assert.equal(brood.stageAge, 0.4);
+  assert.equal(brood.stage, BroodStage.EGG);
+});
+
+test("environment metrics and dynamic source positions reset reproducibly", () => {
+  const simulation = new Simulation({
+    ...foragingConfig(),
+    environmentEnabled: true,
+    seasonDurationTicks: 3,
+    foodSpawnProbability: 1,
+    maxActiveSources: 2,
+    dangerZones: [],
+  });
+  for (let index = 0; index < 13; index += 1) simulation.tick();
+  const firstWorld = JSON.stringify(simulation.foodSources);
+  const metrics = simulation.getMetrics();
+  assert.equal(metrics.season, Season.SPRING);
+  assert.equal(metrics.seasonCycle, 1);
+  assert.equal(metrics.seasonCyclesCompleted, 1);
+  assert.ok(metrics.foodSources <= 2);
+  simulation.reset();
+  for (let index = 0; index < 13; index += 1) simulation.tick();
+  assert.equal(JSON.stringify(simulation.foodSources), firstWorld);
+});
+
+test("autonomy estimates how long the current stock funds recent consumption", () => {
+  const simulation = new Simulation(foragingConfig({ initialFoodStock: 10 }));
+  simulation.consumptionWindow = [0.5, 1.5];
+  simulation.consumptionWindowTotal = 2;
+  assert.equal(simulation.getMetrics().averageConsumptionPerTick, 1);
+  assert.equal(simulation.getMetrics().autonomyTicks, 10);
+});
+
+test("stored food improves survival through repeated seasonal pressure", () => {
+  const run = (initialFoodStock) => {
+    const simulation = new Simulation({
+      ...foragingConfig(),
+      initialAnts: 5,
+      antSpeed: 0,
+      antEnergy: 1,
+      antMaxEnergy: 1,
+      initialFoodStock,
+      foodSources: [],
+      environmentEnabled: true,
+      seasonDurationTicks: 20,
+      foodSpawnProbability: 0,
+      maxActiveSources: 0,
+      dangerZones: [],
+      reproductionEnabled: false,
+      basalEnergyConsumptionRate: 0.5,
+      foodEnergyValue: 10,
+      nest: { x: 60, y: 40, radius: 10 },
+    });
+    for (let index = 0; index < 200; index += 1) simulation.tick();
+    return simulation.getMetrics().livingAnts;
+  };
+  assert.equal(run(0), 0);
+  assert.ok(run(10) > 0);
 });

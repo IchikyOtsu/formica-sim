@@ -19,7 +19,7 @@
           </span>
           <div>
             <p class="eyebrow">Laboratoire de terrain</p>
-            <h1>FORMICA <span>/ SIM V0.6</span></h1>
+            <h1>FORMICA <span>/ SIM V0.7</span></h1>
           </div>
         </div>
         <div class="status-pill"><span></span> Système opérationnel</div>
@@ -73,6 +73,21 @@
             </div>
           </div>
 
+          <div class="environment-panel">
+            <p class="section-label">Environnement</p>
+            <div class="signal-stats">
+              <p><strong id="current-season">—</strong><span>Saison</span></p>
+              <p><strong id="temperature">0 °C</strong><span>Température</span></p>
+              <p><strong id="environment-pressure">0</strong><span>Pression</span></p>
+            </div>
+            <div class="economy-stats">
+              <p><span>Cycle saisonnier</span><strong id="season-cycle">0</strong></p>
+              <p><span>Autonomie</span><strong id="autonomy">—</strong></p>
+              <p><span>Morts famine</span><strong id="starvation-deaths">0</strong></p>
+              <p><span>Morts milieu</span><strong id="environmental-deaths">0</strong></p>
+            </div>
+          </div>
+
           <div class="metabolism-panel">
             <p class="section-label">Métabolisme</p>
             <div class="signal-stats">
@@ -109,13 +124,14 @@
             <div><span class="legend-dot brood-dot"></span> Couvain <em>Œuf · larve · pupe</em></div>
             <div><span class="legend-dot nest-dot"></span> Nid <em>Point d'origine</em></div>
             <div><span class="legend-dot food-dot"></span> Nourriture <em>Ressource</em></div>
+            <div><span class="legend-dot danger-dot"></span> Zone dangereuse <em>Risque + coût</em></div>
             <div><span class="legend-dot food-pheromone-dot"></span> FOOD <em>Vers nourriture</em></div>
             <div><span class="legend-dot home-pheromone-dot"></span> HOME <em>Vers le nid</em></div>
           </div>
 
           <div class="observation">
             <p class="section-label">Observation</p>
-            <p>Après les ouvrières et les larves, la reine investit le surplus du nid dans de nouvelles ouvrières.</p>
+            <p>Le monde alterne abondance et pression. Les réserves accumulées déterminent la capacité de la colonie à traverser l’hiver.</p>
           </div>
         </aside>
 
@@ -170,7 +186,13 @@
               <label>Couvain max.<input id="param-max-brood" type="number" min="1" max="100" step="1" value="12" /></label>
               <label>Coût d'un œuf<input id="param-egg-cost" type="number" min="0" max="20" step="0.1" value="0.5" /></label>
               <label>Conso. larve/tick<input id="param-larva-food" type="number" min="0" max="1" step="0.001" value="0.002" /></label>
-              <label>Régénération/source<input id="param-food-regen" type="number" min="0" max="0.1" step="0.0001" value="0" /></label>
+              <label>Régénération/source<input id="param-food-regen" type="number" min="0" max="0.1" step="0.0001" value="0.002" /></label>
+              <label class="check-label">Saisons<input id="param-environment" type="checkbox" checked /></label>
+              <label>Durée saison<input id="param-season-duration" type="number" min="100" max="100000" step="100" value="5000" /></label>
+              <label>Pression milieu<input id="param-environment-severity" type="number" min="0" max="3" step="0.1" value="1" /></label>
+              <label>Proba. apparition<input id="param-spawn-probability" type="number" min="0" max="0.1" step="0.001" value="0.003" /></label>
+              <label>Sources max.<input id="param-max-sources" type="number" min="1" max="20" step="1" value="5" /></label>
+              <label>Délai réapparition<input id="param-respawn-delay" type="number" min="0" max="100000" step="100" value="1200" /></label>
               <button type="submit">Appliquer + Reset</button>
             </form>
           </details>

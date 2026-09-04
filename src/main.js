@@ -13,6 +13,13 @@ let previousTime = performance.now();
 
 const elements = {
   tick: document.querySelector("#tick"),
+  season: document.querySelector("#current-season"),
+  temperature: document.querySelector("#temperature"),
+  environmentPressure: document.querySelector("#environment-pressure"),
+  seasonCycle: document.querySelector("#season-cycle"),
+  autonomy: document.querySelector("#autonomy"),
+  starvationDeaths: document.querySelector("#starvation-deaths"),
+  environmentalDeaths: document.querySelector("#environmental-deaths"),
   ants: document.querySelector("#ant-count"),
   totalAnts: document.querySelector("#total-ant-count"),
   eggs: document.querySelector("#egg-count"),
@@ -54,6 +61,15 @@ function formatTime(milliseconds) {
 function updateMetrics() {
   const metrics = simulation.getMetrics();
   elements.tick.textContent = String(metrics.tick).padStart(6, "0");
+  elements.season.textContent = metrics.seasonLabel;
+  elements.temperature.textContent = `${metrics.temperature} °C`;
+  elements.environmentPressure.textContent = metrics.environmentalPressure.toFixed(2);
+  elements.seasonCycle.textContent = metrics.seasonCyclesCompleted;
+  elements.autonomy.textContent = metrics.autonomyTicks === null
+    ? "—"
+    : `${Math.round(metrics.autonomyTicks)} ticks`;
+  elements.starvationDeaths.textContent = metrics.starvationDeaths;
+  elements.environmentalDeaths.textContent = metrics.environmentalDeaths;
   elements.ants.textContent = metrics.ants;
   elements.totalAnts.textContent = metrics.totalPopulation;
   elements.eggs.textContent = metrics.eggs;
@@ -145,6 +161,12 @@ document.querySelector("#parameters-form").addEventListener("submit", (event) =>
     eggFoodCost: Number(document.querySelector("#param-egg-cost").value),
     larvaFoodPerTick: Number(document.querySelector("#param-larva-food").value),
     foodRegenerationRate: Number(document.querySelector("#param-food-regen").value),
+    environmentEnabled: document.querySelector("#param-environment").checked,
+    seasonDurationTicks: Number(document.querySelector("#param-season-duration").value),
+    environmentSeverity: Number(document.querySelector("#param-environment-severity").value),
+    foodSpawnProbability: Number(document.querySelector("#param-spawn-probability").value),
+    maxActiveSources: Number(document.querySelector("#param-max-sources").value),
+    foodRespawnDelayTicks: Number(document.querySelector("#param-respawn-delay").value),
   });
   accumulator = 0;
   updateMetrics();

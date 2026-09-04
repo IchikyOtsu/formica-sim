@@ -1,11 +1,23 @@
 import { AntState, ReturnReason } from "../entities/Ant.js";
 
 export class MetabolismSystem {
-  consumeEnergy(ant, distance, deltaSeconds, carryingCostMultiplier, basalRate) {
+  consumeEnergy(
+    ant,
+    distance,
+    deltaSeconds,
+    carryingCostMultiplier,
+    basalRate,
+    movementMultiplier = 1,
+    metabolismMultiplier = 1,
+  ) {
     if (ant.state === AntState.DEAD) return false;
     const movementCost = distance * ant.energyConsumptionRate
-      * (ant.carryingFood ? carryingCostMultiplier : 1);
-    ant.energy = Math.max(0, ant.energy - movementCost - basalRate * deltaSeconds);
+      * (ant.carryingFood ? carryingCostMultiplier : 1)
+      * movementMultiplier;
+    ant.energy = Math.max(
+      0,
+      ant.energy - movementCost - basalRate * deltaSeconds * metabolismMultiplier,
+    );
     if (ant.energy > 0) return false;
     ant.state = AntState.DEAD;
     ant.target = null;

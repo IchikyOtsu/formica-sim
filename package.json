@@ -1,12 +1,13 @@
 {
   "name": "formica-sim",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "private": true,
   "type": "module",
   "scripts": {
     "start": "node server.js",
     "test": "node --test",
-    "benchmark": "node scripts/demography-benchmark.js",
+    "benchmark": "node scripts/environment-benchmark.js",
+    "benchmark:demography": "node scripts/demography-benchmark.js",
     "benchmark:survival": "node scripts/ecology-benchmark.js",
     "benchmark:pheromones": "node scripts/benchmark.js"
   }

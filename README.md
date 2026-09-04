@@ -1,9 +1,9 @@
 # Formica Sim
 
 Un petit laboratoire visuel pour observer une colonie de fourmis dans un monde
-2D. La V0.6 rend la population dynamique : une reine immobile transforme les
-surplus alimentaires en œufs, le couvain traverse trois stades et les nouvelles
-ouvrières rejoignent la collecte, le métabolisme et les réseaux de phéromones.
+2D. La V0.7 place sa démographie dans un monde dynamique : les sources suivent
+un cycle de vie, les saisons modulent ressources et coûts, et des zones
+dangereuses exercent une pression énergétique ou mortelle sur les ouvrières.
 
 ## Lancer le projet
 
@@ -21,7 +21,7 @@ Puis ouvrir <http://localhost:4173>.
 npm test
 ```
 
-Comparer les cinq régimes démographiques pendant 50 000 ticks :
+Comparer environnement stable, saisons modérées et saisons hostiles :
 
 ```bash
 npm run benchmark
@@ -30,7 +30,7 @@ npm run benchmark
 Le nombre de seeds et la durée sont configurables :
 
 ```bash
-npm run benchmark -- --seeds=10 --ticks=50000
+npm run benchmark -- --seeds=10 --ticks=40000 --season=2500
 ```
 
 Le benchmark historique des réseaux de phéromones reste disponible :
@@ -38,6 +38,9 @@ Le benchmark historique des réseaux de phéromones reste disponible :
 ```bash
 npm run benchmark:pheromones
 ```
+
+Le benchmark démographique V0.6 reste disponible avec
+`npm run benchmark:demography`.
 
 Le benchmark V0.5 de survie est également conservé :
 
@@ -51,12 +54,14 @@ npm run benchmark:survival
 src/
 ├── behaviors/{RandomWalk,SearchFoodBehavior,ReturnHomeBehavior}.js
 ├── entities/{Ant,Colony,FoodSource,Nest,Queen,Brood}.js
+├── environment/{Season,EnvironmentConfig,DangerZone}.js
 ├── rendering/Renderer.js
 ├── simulation/{Simulation,SimulationConfig,World,PheromoneField}.js
 ├── systems/{MovementSystem,FoodDetectionSystem,FoodCollectionSystem}.js
 ├── systems/{PheromoneDepositSystem,PheromoneSensingSystem,HomeDetectionSystem}.js
 ├── systems/MetabolismSystem.js
 ├── systems/{BroodSystem,FoodRegenerationSystem}.js
+├── systems/{EnvironmentSystem,FoodSpawnSystem,HazardSystem}.js
 ├── main.js
 └── styles.css
 ```
@@ -140,11 +145,35 @@ L'ordre budgétaire est déterministe à chaque tick :
 2. entretien minimal des larves ;
 3. nouvelle ponte éventuelle.
 
-La régénération des sources est bornée par leur quantité initiale et désactivée
-par défaut. Une source fractionnaire doit atteindre une unité avant de redevenir
+La régénération des sources est bornée par leur quantité initiale. Une source
+fractionnaire doit atteindre une unité avant de redevenir
 collectable. Le panneau de paramètres permet de régler la reproduction, le
 cooldown, le seuil de stock, la taille maximale du couvain, ses coûts et la
 régénération, avec reset reproductible.
+
+## Monde dynamique et pression environnementale V0.7
+
+Une source parcourt désormais `SPAWN → ACTIVE → DEPLETED → COOLDOWN → RESPAWN`.
+Après épuisement ou expiration, elle attend son délai puis réapparaît à une
+position et avec une quantité tirées par le générateur déterministe. Le nombre
+de sources actives reste borné.
+
+Les saisons `PRINTEMPS`, `ÉTÉ`, `AUTOMNE` et `HIVER` modulent indépendamment la
+régénération, le métabolisme, le coût du mouvement, le développement du couvain
+et la dangerosité. Elles ne donnent aucune consigne à la reine : la contraction
+en période pauvre découle uniquement du stock et des priorités économiques déjà
+existantes. Une limite de population empêche une croissance sans borne pendant
+les longues expériences.
+
+Les zones dangereuses sont visibles en rouge sur le Canvas. Les traverser
+augmente le coût de déplacement et expose à une faible mortalité aléatoire,
+issue d'un flux pseudo-aléatoire séparé. Reset restaure donc aussi exactement
+les saisons, sources et événements environnementaux.
+
+Le tableau de bord expose la saison, la température, la pression, le cycle,
+les morts par famine ou environnement et l'autonomie estimée. Cette dernière
+vaut `stock / consommation moyenne récente` et reste indéfinie tant qu'aucune
+nourriture n'a été consommée.
 
 ## Benchmark des phéromones V0.4
 
@@ -192,7 +221,7 @@ proviennent uniquement du métabolisme, de la collecte et de la mortalité.
 
 ## Benchmark démographique V0.6
 
-`npm run benchmark` compare reproduction désactivée, prudente, agressive,
+`npm run benchmark:demography` compare reproduction désactivée, prudente, agressive,
 ressources rares et ressources abondantes. Il rapporte population finale et
 maximale, ouvrières vivantes, stock, âge moyen, naissances, morts, croissance
 nette et coût du couvain. `--seeds` et `--ticks` permettent les expériences
@@ -210,3 +239,12 @@ E — ressources abond. 109 ouvrières, population max. 112
 
 La reine compte dans la population totale, tout comme le couvain, mais pas les
 ouvrières mortes. Il n'existe encore ni caste, ni soldat, ni génétique.
+
+## Benchmark environnemental V0.7
+
+`npm run benchmark` exécute un contrôle stable, des saisons modérées et un monde
+hostile sur plusieurs cycles. Il rapporte population moyenne, minimale et
+finale, stocks minimal et maximal, naissances, mortalité ventilée, extinction et
+cycles saisonniers traversés. Les options `--seeds`, `--ticks` et `--season`
+contrôlent respectivement le nombre de graines, la durée totale et la durée de
+chaque saison.

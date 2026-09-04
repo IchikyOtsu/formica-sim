@@ -34,13 +34,14 @@ export class Renderer {
   render(simulation) {
     this.resize();
     const ctx = this.context;
-    const { world, colony, foodSources } = simulation;
+    const { world, colony, foodSources, dangerZones } = simulation;
     const scaleX = this.canvas.width / world.width;
     const scaleY = this.canvas.height / world.height;
 
     ctx.setTransform(scaleX, 0, 0, scaleY, 0, 0);
     ctx.clearRect(0, 0, world.width, world.height);
     this.drawGrid(ctx, world);
+    for (const zone of dangerZones) this.drawDangerZone(ctx, zone);
     if (this.pheromoneMode !== "OFF") this.drawPheromones(ctx, simulation.pheromoneField);
 
     for (const source of foodSources) {
@@ -76,6 +77,21 @@ export class Renderer {
       this.drawPheromoneLayer(ctx, field, PheromoneType.FOOD, [137, 201, 102]);
     }
     ctx.restore();
+  }
+
+  drawDangerZone(ctx, zone) {
+    const { x, y } = zone.position;
+    const gradient = ctx.createRadialGradient(x, y, 4, x, y, zone.radius);
+    gradient.addColorStop(0, "rgba(190, 74, 54, 0.22)");
+    gradient.addColorStop(1, "rgba(190, 74, 54, 0.04)");
+    ctx.fillStyle = gradient;
+    ctx.beginPath();
+    ctx.arc(x, y, zone.radius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = "rgba(224, 107, 78, 0.46)";
+    ctx.setLineDash([5, 6]);
+    ctx.stroke();
+    ctx.setLineDash([]);
   }
 
   drawPheromoneLayer(ctx, field, type, color) {

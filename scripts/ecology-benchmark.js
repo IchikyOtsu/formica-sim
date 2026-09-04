@@ -19,6 +19,7 @@ const experiments = [
 function run(experiment, seed) {
   const simulation = new Simulation({
     ...DEFAULT_CONFIG,
+    environmentEnabled: false,
     reproductionEnabled: false,
     foodRegenerationRate: 0,
     ...experiment,

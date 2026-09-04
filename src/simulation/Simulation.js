@@ -7,12 +7,17 @@ import { BroodStage } from "../entities/Brood.js";
 import { FoodSource } from "../entities/FoodSource.js";
 import { Nest } from "../entities/Nest.js";
 import { Queen } from "../entities/Queen.js";
+import { DangerZone } from "../environment/DangerZone.js";
+import { SEASON_LABELS } from "../environment/Season.js";
 import { BroodSystem } from "../systems/BroodSystem.js";
+import { EnvironmentSystem } from "../systems/EnvironmentSystem.js";
 import { MovementSystem } from "../systems/MovementSystem.js";
 import { MetabolismSystem } from "../systems/MetabolismSystem.js";
 import { FoodCollectionSystem } from "../systems/FoodCollectionSystem.js";
 import { FoodDetectionSystem } from "../systems/FoodDetectionSystem.js";
 import { FoodRegenerationSystem } from "../systems/FoodRegenerationSystem.js";
+import { FoodSpawnSystem } from "../systems/FoodSpawnSystem.js";
+import { HazardSystem } from "../systems/HazardSystem.js";
 import { HomeDetectionSystem } from "../systems/HomeDetectionSystem.js";
 import { PheromoneDepositSystem } from "../systems/PheromoneDepositSystem.js";
 import { PheromoneSensingSystem } from "../systems/PheromoneSensingSystem.js";
@@ -38,6 +43,8 @@ export class Simulation {
     this.homeDetection = new HomeDetectionSystem();
     this.metabolism = new MetabolismSystem();
     this.foodRegeneration = new FoodRegenerationSystem();
+    this.environment = new EnvironmentSystem();
+    this.hazard = new HazardSystem();
     this.reset();
   }
 
@@ -53,10 +60,13 @@ export class Simulation {
     this.random = seededRandom(this.config.seed);
     this.sensingRandom = seededRandom(this.config.seed ^ 0x9e3779b9);
     this.birthRandom = seededRandom(this.config.seed ^ 0x85ebca6b);
+    this.environmentRandom = seededRandom(this.config.seed ^ 0xc2b2ae35);
+    this.hazardRandom = seededRandom(this.config.seed ^ 0x27d4eb2f);
     this.randomWalk = new RandomWalk(this.random, this.config.explorationStrength);
     this.searchFood = new SearchFoodBehavior(this.randomWalk, this.config.pheromoneInfluence);
     this.returnHome = new ReturnHomeBehavior(this.randomWalk, this.config.homeTrailInfluence);
     this.pheromoneSensing = new PheromoneSensingSystem(this.sensingRandom);
+    this.foodSpawn = new FoodSpawnSystem(this.environmentRandom);
     this.world = new World(this.config.width, this.config.height);
     this.pheromoneField = new PheromoneField(
       this.config.width,
@@ -78,7 +88,17 @@ export class Simulation {
       layingCooldownTicks: this.config.queenLayingCooldownTicks,
     });
     this.broodSystem = new BroodSystem();
-    this.foodSources = this.config.foodSources.map((source) => new FoodSource(source));
+    const initialSourceConfigs = this.config.environmentEnabled
+      ? this.config.foodSources.slice(0, this.config.maxActiveSources)
+      : this.config.foodSources;
+    this.foodSources = initialSourceConfigs.map((source, index) => new FoodSource({
+      id: source.id ?? `FOOD-${index + 1}`,
+      ...source,
+    }));
+    this.dangerZones = this.config.environmentEnabled
+      ? (this.config.dangerZones ?? []).map((zone) => new DangerZone(zone))
+      : [];
+    this.currentEnvironment = this.environment.getState(0, this.config);
     this.initialFoodQuantity = this.foodSources.reduce((total, source) => total + source.quantity, 0);
     this.totalDistance = 0;
     this.totalPickups = 0;
@@ -87,6 +107,11 @@ export class Simulation {
     this.exploredCells = new Set();
     this.lostFood = 0;
     this.regeneratedFood = 0;
+    this.expiredFood = 0;
+    this.starvationDeaths = 0;
+    this.environmentalDeaths = 0;
+    this.consumptionWindow = [];
+    this.consumptionWindowTotal = 0;
     this.births = 0;
     this.nextAntId = this.config.initialAnts + 1;
     this.maxPopulation = this.config.initialAnts + 1;
@@ -114,10 +139,23 @@ export class Simulation {
 
   tick() {
     const deltaSeconds = this.config.tickDurationMs / 1000;
-    this.regeneratedFood += this.foodRegeneration.update(
-      this.foodSources,
-      this.config.foodRegenerationRate,
-    );
+    const consumedAtStart = this.colony.consumedFood;
+    this.currentEnvironment = this.environment.getState(this.tickCount, this.config);
+    if (this.config.environmentEnabled) {
+      const foodUpdate = this.foodSpawn.update(
+        this.foodSources,
+        this.world,
+        this.config,
+        this.currentEnvironment.foodRegenerationMultiplier,
+      );
+      this.regeneratedFood += foodUpdate.regenerated;
+      this.expiredFood += foodUpdate.expiredFood;
+    } else {
+      this.regeneratedFood += this.foodRegeneration.update(
+        this.foodSources,
+        this.config.foodRegenerationRate,
+      );
+    }
     if (this.config.pheromonesEnabled) {
       this.pheromoneField.update({
         evaporationRate: this.config.pheromoneEvaporationRate,
@@ -140,8 +178,10 @@ export class Simulation {
           deltaSeconds,
           this.config.carryingEnergyMultiplier,
           this.config.basalEnergyConsumptionRate,
+          1,
+          this.currentEnvironment.metabolismMultiplier,
         )) {
-          this.handleDeath(ant);
+          this.handleDeath(ant, "STARVATION");
           continue;
         }
         this.metabolism.feedAtNest(
@@ -197,14 +237,29 @@ export class Simulation {
 
       const distance = this.movement.update(ant, this.world, deltaSeconds, targetDistance);
       this.totalDistance += distance;
+      const hazardMovementMultiplier = this.hazard.movementMultiplier(
+        ant.position,
+        this.dangerZones,
+      );
       if (this.metabolism.consumeEnergy(
         ant,
         distance,
         deltaSeconds,
         this.config.carryingEnergyMultiplier,
         this.config.basalEnergyConsumptionRate,
+        this.currentEnvironment.movementCostMultiplier * hazardMovementMultiplier,
+        this.currentEnvironment.metabolismMultiplier,
       )) {
-        this.handleDeath(ant);
+        this.handleDeath(ant, "STARVATION");
+        continue;
+      }
+      if (this.hazard.applyMortality(
+        ant,
+        this.dangerZones,
+        this.currentEnvironment.hazardMultiplier,
+        this.hazardRandom,
+      )) {
+        this.handleDeath(ant, "ENVIRONMENT");
         continue;
       }
       this.rememberCell(ant);
@@ -237,20 +292,34 @@ export class Simulation {
         }
       }
     }
-    const emergedWorkers = this.broodSystem.update(this.colony, this.config);
+    const emergedWorkers = this.broodSystem.update(
+      this.colony,
+      this.config,
+      this.currentEnvironment.broodDevelopmentMultiplier,
+    );
     for (let index = 0; index < emergedWorkers; index += 1) this.spawnWorker();
     this.births += emergedWorkers;
     const currentPopulation = this.colony.ants.filter((ant) => ant.state !== AntState.DEAD).length
       + this.colony.brood.length + 1;
     this.maxPopulation = Math.max(this.maxPopulation, currentPopulation);
+    const consumedThisTick = this.colony.consumedFood - consumedAtStart;
+    this.consumptionWindow.push(consumedThisTick);
+    this.consumptionWindowTotal += consumedThisTick;
+    if (this.consumptionWindow.length > this.config.autonomyWindowTicks) {
+      this.consumptionWindowTotal -= this.consumptionWindow.shift();
+    }
     this.tickCount += 1;
     this.elapsedMs += this.config.tickDurationMs;
-    if (this.completionTick === null && this.colony.resources === this.initialFoodQuantity) {
+    if (!this.config.environmentEnabled
+      && this.completionTick === null
+      && this.colony.resources === this.initialFoodQuantity) {
       this.completionTick = this.tickCount;
     }
   }
 
-  handleDeath(ant) {
+  handleDeath(ant, cause = "STARVATION") {
+    if (cause === "ENVIRONMENT") this.environmentalDeaths += 1;
+    else this.starvationDeaths += 1;
     if (ant.carryingFood) {
       this.lostFood += ant.carryingFoodAmount;
       ant.carryingFood = false;
@@ -328,8 +397,23 @@ export class Simulation {
     const averageEnergy = energies.length === 0
       ? 0
       : energies.reduce((total, energy) => total + energy, 0) / energies.length;
+    const averageConsumptionPerTick = this.consumptionWindow.length === 0
+      ? 0
+      : this.consumptionWindowTotal / this.consumptionWindow.length;
     return {
       tick: this.tickCount,
+      season: this.currentEnvironment.season,
+      seasonLabel: SEASON_LABELS[this.currentEnvironment.season],
+      seasonCycle: this.currentEnvironment.cycle,
+      seasonCyclesCompleted: this.config.environmentEnabled
+        ? Math.floor(this.tickCount / (Math.max(1, this.config.seasonDurationTicks) * 4))
+        : 0,
+      temperature: this.currentEnvironment.temperature,
+      environmentalPressure: this.currentEnvironment.pressure,
+      foodRegenerationMultiplier: this.currentEnvironment.foodRegenerationMultiplier,
+      metabolismMultiplier: this.currentEnvironment.metabolismMultiplier,
+      movementCostMultiplier: this.currentEnvironment.movementCostMultiplier,
+      broodDevelopmentMultiplier: this.currentEnvironment.broodDevelopmentMultiplier,
       ants: livingAnts.length,
       totalAnts: this.colony.ants.length,
       totalPopulation: livingAnts.length + this.colony.brood.length + 1,
@@ -342,6 +426,8 @@ export class Simulation {
       averageWorkerAge,
       births: this.births,
       deaths: this.colony.ants.length - livingAnts.length,
+      starvationDeaths: this.starvationDeaths,
+      environmentalDeaths: this.environmentalDeaths,
       netGrowth: this.births - (this.colony.ants.length - livingAnts.length),
       birthRate: this.tickCount === 0 ? 0 : this.births / this.tickCount * 1000,
       deathRate: this.tickCount === 0
@@ -358,12 +444,17 @@ export class Simulation {
       resources: this.colony.resources,
       foodStock: this.colony.foodStock,
       consumedFood: this.colony.consumedFood,
+      averageConsumptionPerTick,
+      autonomyTicks: averageConsumptionPerTick === 0
+        ? null
+        : this.colony.foodStock / averageConsumptionPerTick,
       foodBalance: this.colony.resources - this.colony.consumedFood,
       collectionConsumptionRatio: this.colony.consumedFood === 0
         ? null
         : this.colony.resources / this.colony.consumedFood,
       lostFood: this.lostFood,
       regeneratedFood: this.regeneratedFood,
+      expiredFood: this.expiredFood,
       carriedFood: this.colony.ants.reduce(
         (total, ant) => total + ant.carryingFoodAmount,
         0,

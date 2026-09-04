@@ -55,6 +55,9 @@ h1 span { color: var(--accent); font-weight: 500; }
 .signal-panel { padding: 18px 20px; border-bottom: 1px solid var(--line); }
 .metabolism-panel { padding: 18px 20px; border-bottom: 1px solid var(--line); }
 .demography-panel { padding: 18px 20px; border-bottom: 1px solid var(--line); }
+.environment-panel { padding: 18px 20px; border-bottom: 1px solid var(--line); }
+.environment-panel .section-label { margin-bottom: 13px; }
+.environment-panel .signal-stats strong { color: #e7b56b; }
 .demography-panel .section-label { margin-bottom: 13px; }
 .brood-stages strong { color: #e0bd7c; }
 .metabolism-panel .section-label { margin-bottom: 13px; }
@@ -81,6 +84,7 @@ h1 span { color: var(--accent); font-weight: 500; }
 .brood-dot { background: #eee4c9; }
 .nest-dot { background: #745037; box-shadow: 0 0 0 2px #37281e; }
 .food-dot { background: var(--green); }
+.danger-dot { background: #c95f49; box-shadow: 0 0 5px rgba(201, 95, 73, .65); }
 .food-pheromone-dot { background: rgba(137, 201, 102, .75); box-shadow: 0 0 5px #89c966; }
 .home-pheromone-dot { background: rgba(92, 151, 211, .8); box-shadow: 0 0 5px #5c97d3; }
 .observation p:last-child { margin: 0; color: #99a08f; font-size: 11px; line-height: 1.7; }
@@ -125,7 +129,7 @@ canvas { display: block; width: 100%; aspect-ratio: 800 / 520; max-height: calc(
   .workspace { grid-template-columns: 1fr; }
   .sidebar { display: grid; grid-template-columns: 1fr 1fr; border-right: 0; border-bottom: 1px solid var(--line); }
   .panel-heading, .metric-grid { border-bottom: 0; }
-  .legend, .observation, .signal-panel, .metabolism-panel, .demography-panel { display: none; }
+  .legend, .observation, .signal-panel, .metabolism-panel, .demography-panel, .environment-panel { display: none; }
   .controls { flex-wrap: wrap; }
   .parameters form { grid-template-columns: repeat(2, 1fr); }
   .sim-time { display: none; }

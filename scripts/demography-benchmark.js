@@ -37,7 +37,12 @@ const experiments = [
 ];
 
 function run(experiment, seed) {
-  const simulation = new Simulation({ ...DEFAULT_CONFIG, ...experiment.config, seed });
+  const simulation = new Simulation({
+    ...DEFAULT_CONFIG,
+    environmentEnabled: false,
+    ...experiment.config,
+    seed,
+  });
   while (simulation.tickCount < duration) {
     const hasWorkers = simulation.colony.ants.some((ant) => ant.state !== AntState.DEAD);
     if (!hasWorkers && simulation.colony.brood.length === 0) break;
