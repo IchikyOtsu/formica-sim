@@ -4,7 +4,7 @@ import { ReplayController } from "./observability/ReplayController.js";
 import { createRunExport, downloadText, seriesToCsv } from "./observability/RunExporter.js";
 import { TimeSeriesRenderer } from "./observability/TimeSeriesRenderer.js";
 import { evaluatePauseConditions } from "./observability/PauseConditions.js";
-import { SCENARIO_PRESETS, configForPreset } from "./experiments/ScenarioPresets.js";
+import { SCENARIO_PRESETS, SCENARIO_CATEGORIES, configForPreset } from "./experiments/ScenarioPresets.js";
 import { analyticsConfigFrom, toVersionedConfig, CONFIG_SECTIONS } from "./config/ConfigSchema.js";
 import { Renderer } from "./rendering/Renderer.js";
 import { Simulation } from "./simulation/Simulation.js";
@@ -471,12 +471,19 @@ function loadConfiguration(config) {
   updateMetrics();
 }
 
-for (const preset of SCENARIO_PRESETS) {
-  const option = document.createElement("option");
-  option.value = preset.id;
-  option.textContent = preset.name;
-  option.title = preset.description;
-  elements.preset.append(option);
+for (const category of SCENARIO_CATEGORIES) {
+  const presetsInCategory = SCENARIO_PRESETS.filter((preset) => preset.category === category.id);
+  if (presetsInCategory.length === 0) continue;
+  const group = document.createElement("optgroup");
+  group.label = category.label;
+  for (const preset of presetsInCategory) {
+    const option = document.createElement("option");
+    option.value = preset.id;
+    option.textContent = preset.name;
+    option.title = preset.description;
+    group.append(option);
+  }
+  elements.preset.append(group);
 }
 elements.preset.value = "symmetric-competition";
 

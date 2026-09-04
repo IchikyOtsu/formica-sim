@@ -30,11 +30,20 @@ function combatColonies(profileA, profileB) {
   ];
 }
 
+export const SCENARIO_CATEGORIES = Object.freeze([
+  { id: "competition", label: "Compétition & ressources" },
+  { id: "reference-seasons", label: "Référence & saisons" },
+  { id: "alarm", label: "Phéromones ALARM" },
+  { id: "combat", label: "Combat (V1.2)" },
+  { id: "castes", label: "Castes & soldats (V1.3)" },
+]);
+
 export const SCENARIO_PRESETS = Object.freeze([
   {
     id: "symmetric-competition",
     name: "Symétrique V1.1",
     description: "Deux colonies égales, nids opposés et ressources partagées.",
+    category: "competition",
     seed: 1847,
     duration: 50_000,
     config: {
@@ -51,6 +60,7 @@ export const SCENARIO_PRESETS = Object.freeze([
     id: "near-resources",
     name: "Ressources proches",
     description: "Chaque colonie dispose d'une source proche et partage le centre.",
+    category: "competition",
     seed: 12011,
     config: {
       colonies: colonies(),
@@ -66,6 +76,7 @@ export const SCENARIO_PRESETS = Object.freeze([
     id: "far-resources",
     name: "Ressources lointaines",
     description: "Les ressources se trouvent loin des deux nids.",
+    category: "competition",
     seed: 23819,
     config: {
       colonies: colonies(),
@@ -80,6 +91,7 @@ export const SCENARIO_PRESETS = Object.freeze([
     id: "central-rich-source",
     name: "Source centrale riche",
     description: "Une source centrale concentre la compétition spatiale.",
+    category: "competition",
     seed: 31013,
     config: {
       colonies: colonies(),
@@ -91,6 +103,7 @@ export const SCENARIO_PRESETS = Object.freeze([
     id: "competition-scarcity",
     name: "Rareté compétitive",
     description: "Peu de nourriture et deux populations identiques.",
+    category: "competition",
     seed: 41017,
     config: {
       colonies: colonies({ stockA: 3, stockB: 3 }),
@@ -104,28 +117,42 @@ export const SCENARIO_PRESETS = Object.freeze([
     id: "asymmetric-colonies",
     name: "Colonies asymétriques",
     description: "Ambre commence plus nombreuse, Azur avec davantage de réserves.",
+    category: "competition",
     seed: 53047,
     config: { colonies: colonies({ antsA: 65, antsB: 35, stockA: 6, stockB: 30 }) },
   },
   {
-    id: "balanced-combat-v1.2",
-    name: "Combat équilibré V1.2",
-    description: "Défensif contre Agressif, calibrage figé de référence pour le combat local.",
-    seed: 1847,
-    duration: 20_000,
+    id: "resource-scarcity",
+    name: "Ressources rares",
+    description: "Petites sources, peu de stock et forte compétition.",
+    category: "competition",
+    seed: 41017,
     config: {
-      colonies: combatColonies("defensive", "aggressive"),
-      foodSources: [
-        { id: "CENTER", x: 400, y: 260, quantity: 140, radius: 22 },
-        { id: "WEST", x: 265, y: 120, quantity: 60, radius: 16 },
-        { id: "EAST", x: 535, y: 400, quantity: 60, radius: 16 },
-      ],
+      initialFoodStock: 1,
+      foodMinQuantity: 5,
+      foodMaxQuantity: 18,
+      foodSpawnProbability: 0.0005,
+    },
+  },
+  {
+    id: "population-boom",
+    name: "Boom démographique",
+    description: "Ponte rapide et abondance propices à un overshoot.",
+    category: "competition",
+    seed: 7919,
+    config: {
+      queenLayingCooldownTicks: 300,
+      reproductionFoodThreshold: 8,
+      maxBrood: 40,
+      maxWorkers: 250,
+      foodRegenerationRate: 0.008,
     },
   },
   {
     id: "reference-v1",
     name: "Référence V1.0",
     description: "Scénario officiel : 50 ouvrières, saisons modérées et ALARM équilibrée.",
+    category: "reference-seasons",
     seed: 1847,
     duration: 50_000,
     config: {
@@ -141,6 +168,7 @@ export const SCENARIO_PRESETS = Object.freeze([
     id: "stable",
     name: "Stable",
     description: "Ressources fixes, pression environnementale neutralisée.",
+    category: "reference-seasons",
     seed: 1847,
     config: { environmentEnabled: false, foodRegenerationRate: 0.004 },
   },
@@ -148,6 +176,7 @@ export const SCENARIO_PRESETS = Object.freeze([
     id: "moderate-seasons",
     name: "Saisons modérées",
     description: "Cycle écologique équilibré avec dangers ordinaires.",
+    category: "reference-seasons",
     seed: 1847,
     config: { environmentEnabled: true, environmentSeverity: 1 },
   },
@@ -155,6 +184,7 @@ export const SCENARIO_PRESETS = Object.freeze([
     id: "hostile-winter",
     name: "Hiver hostile",
     description: "Régénération faible, coûts élevés et stock initial limité.",
+    category: "reference-seasons",
     seed: 937421,
     config: {
       environmentEnabled: true,
@@ -168,6 +198,7 @@ export const SCENARIO_PRESETS = Object.freeze([
     id: "balanced-alarm",
     name: "ALARM équilibrée",
     description: "Évitement efficace avec une trace courte.",
+    category: "alarm",
     seed: 1847,
     config: { alarmPheromonesEnabled: true, alarmInfluence: 1.2 },
   },
@@ -175,6 +206,7 @@ export const SCENARIO_PRESETS = Object.freeze([
     id: "persistent-alarm",
     name: "ALARM persistante",
     description: "Prudence excessive et barrières informationnelles.",
+    category: "alarm",
     seed: 1847,
     config: {
       alarmPheromonesEnabled: true,
@@ -185,28 +217,47 @@ export const SCENARIO_PRESETS = Object.freeze([
     },
   },
   {
-    id: "resource-scarcity",
-    name: "Ressources rares",
-    description: "Petites sources, peu de stock et forte compétition.",
-    seed: 41017,
+    id: "balanced-combat-v1.2",
+    name: "Combat équilibré V1.2",
+    description: "Défensif contre Agressif, calibrage figé de référence pour le combat local.",
+    category: "combat",
+    seed: 1847,
+    duration: 20_000,
     config: {
-      initialFoodStock: 1,
-      foodMinQuantity: 5,
-      foodMaxQuantity: 18,
-      foodSpawnProbability: 0.0005,
+      colonies: combatColonies("defensive", "aggressive"),
+      foodSources: [
+        { id: "CENTER", x: 400, y: 260, quantity: 140, radius: 22 },
+        { id: "WEST", x: 265, y: 120, quantity: 60, radius: 16 },
+        { id: "EAST", x: 535, y: 400, quantity: 60, radius: 16 },
+      ],
     },
   },
   {
-    id: "population-boom",
-    name: "Boom démographique",
-    description: "Ponte rapide et abondance propices à un overshoot.",
-    seed: 7919,
+    id: "castes-v1.3",
+    name: "Castes adaptatives V1.3",
+    description: "Ambre (défensive, castes adaptatives) contre Azur (agressive figée) : les soldats apparaissent avec un délai après la montée de la menace, sans réglage manuel.",
+    category: "castes",
+    seed: 1847,
+    duration: 15_000,
     config: {
       queenLayingCooldownTicks: 300,
-      reproductionFoodThreshold: 8,
-      maxBrood: 40,
-      maxWorkers: 250,
-      foodRegenerationRate: 0.008,
+      maxBrood: 20,
+      colonies: [
+        {
+          ...colonies()[0],
+          ...combatProfileOverrides("defensive"),
+          castesEnabled: true,
+          casteSoldierRatioCap: 0.35,
+          threatPressureRatioScale: 150,
+          casteStockThreshold: 30,
+        },
+        { ...colonies()[1], ...combatProfileOverrides("aggressive") },
+      ],
+      foodSources: [
+        { id: "CENTER", x: 400, y: 260, quantity: 140, radius: 22 },
+        { id: "WEST", x: 265, y: 120, quantity: 60, radius: 16 },
+        { id: "EAST", x: 535, y: 400, quantity: 60, radius: 16 },
+      ],
     },
   },
 ]);
