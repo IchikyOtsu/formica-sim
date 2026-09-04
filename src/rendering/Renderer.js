@@ -1,12 +1,21 @@
+import { PheromoneType } from "../simulation/PheromoneField.js";
+
 export class Renderer {
   constructor(canvas) {
     this.canvas = canvas;
     this.context = canvas.getContext("2d");
-    this.showPheromones = true;
+    this.pheromoneMode = "BOTH";
   }
 
   setPheromonesVisible(visible) {
-    this.showPheromones = visible;
+    this.pheromoneMode = visible ? "BOTH" : "OFF";
+  }
+
+  setPheromoneMode(mode) {
+    if (!["BOTH", "FOOD", "HOME", "OFF"].includes(mode)) {
+      throw new Error(`Unknown pheromone display mode: ${mode}`);
+    }
+    this.pheromoneMode = mode;
   }
 
   resize() {
@@ -30,7 +39,7 @@ export class Renderer {
     ctx.setTransform(scaleX, 0, 0, scaleY, 0, 0);
     ctx.clearRect(0, 0, world.width, world.height);
     this.drawGrid(ctx, world);
-    if (this.showPheromones) this.drawPheromones(ctx, simulation.pheromoneField);
+    if (this.pheromoneMode !== "OFF") this.drawPheromones(ctx, simulation.pheromoneField);
 
     for (const source of foodSources) {
       if (source.active) this.drawFood(ctx, source);
@@ -57,12 +66,23 @@ export class Renderer {
   drawPheromones(ctx, field) {
     ctx.save();
     ctx.globalCompositeOperation = "screen";
+    if (this.pheromoneMode === "BOTH" || this.pheromoneMode === "HOME") {
+      this.drawPheromoneLayer(ctx, field, PheromoneType.HOME, [92, 151, 211]);
+    }
+    if (this.pheromoneMode === "BOTH" || this.pheromoneMode === "FOOD") {
+      this.drawPheromoneLayer(ctx, field, PheromoneType.FOOD, [137, 201, 102]);
+    }
+    ctx.restore();
+  }
+
+  drawPheromoneLayer(ctx, field, type, color) {
+    const values = field.layer(type);
     for (let row = 0; row < field.rows; row += 1) {
       for (let column = 0; column < field.columns; column += 1) {
-        const intensity = field.values[row * field.columns + column];
+        const intensity = values[row * field.columns + column];
         if (intensity <= 0) continue;
         const alpha = Math.min(0.46, Math.sqrt(intensity / field.maxIntensity) * 0.48);
-        ctx.fillStyle = `rgba(114, 193, 112, ${alpha})`;
+        ctx.fillStyle = `rgba(${color.join(", ")}, ${alpha})`;
         ctx.fillRect(
           column * field.cellSize,
           row * field.cellSize,
@@ -71,7 +91,6 @@ export class Renderer {
         );
       }
     }
-    ctx.restore();
   }
 
   drawNest(ctx, nest) {

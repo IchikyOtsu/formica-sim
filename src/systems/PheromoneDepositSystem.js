@@ -1,14 +1,15 @@
 import { AntState } from "../entities/Ant.js";
+import { PheromoneType } from "../simulation/PheromoneField.js";
 
 export class PheromoneDepositSystem {
-  deposit(ant, field, nest, world, baseAmount) {
-    if (!ant.carryingFood || ant.state !== AntState.RETURNING_HOME) return 0;
-    const distanceFromNest = Math.hypot(
-      ant.position.x - nest.position.x,
-      ant.position.y - nest.position.y,
-    );
-    const worldDiagonal = Math.hypot(world.width, world.height);
-    const distanceSignal = 0.15 + 3 * (distanceFromNest / worldDiagonal);
-    return field.deposit(ant.position, baseAmount * distanceSignal);
+  deposit(ant, field, options) {
+    if (ant.state === AntState.SEARCHING_FOOD && options.homeEnabled) {
+      const strength = options.homeStrength / (1 + ant.distanceSinceNest / options.homeFalloffDistance);
+      return field.deposit(PheromoneType.HOME, ant.position, strength);
+    }
+    if (ant.state === AntState.RETURNING_HOME && ant.carryingFood && options.foodEnabled) {
+      return field.deposit(PheromoneType.FOOD, ant.position, options.foodStrength);
+    }
+    return 0;
   }
 }

@@ -1,14 +1,16 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { SearchFoodBehavior } from "../src/behaviors/SearchFoodBehavior.js";
+import { ReturnHomeBehavior } from "../src/behaviors/ReturnHomeBehavior.js";
 import { Ant, AntState } from "../src/entities/Ant.js";
 import { FoodSource } from "../src/entities/FoodSource.js";
-import { PheromoneField } from "../src/simulation/PheromoneField.js";
+import { PheromoneField, PheromoneType } from "../src/simulation/PheromoneField.js";
 import { Renderer } from "../src/rendering/Renderer.js";
 import { Simulation } from "../src/simulation/Simulation.js";
 import { DEFAULT_CONFIG } from "../src/simulation/SimulationConfig.js";
 import { World } from "../src/simulation/World.js";
 import { FoodDetectionSystem } from "../src/systems/FoodDetectionSystem.js";
+import { HomeDetectionSystem } from "../src/systems/HomeDetectionSystem.js";
 import { PheromoneDepositSystem } from "../src/systems/PheromoneDepositSystem.js";
 import { PheromoneSensingSystem } from "../src/systems/PheromoneSensingSystem.js";
 
@@ -131,43 +133,59 @@ test("reset restores food, stock, carrying state, and deterministic ants", () =>
   assert.equal(JSON.stringify(simulation.colony.ants), initialAnts);
 });
 
-test("pheromone deposits reinforce a cell and evaporate below the threshold", () => {
+test("typed pheromone deposits stay independent and evaporate below the threshold", () => {
   const field = new PheromoneField(100, 80, 10, 50);
   const position = { x: 25, y: 25 };
-  field.deposit(position, 8);
-  const firstDeposit = field.sample(position);
-  field.deposit(position, 8);
-  assert.ok(field.sample(position) > firstDeposit);
+  field.deposit(PheromoneType.FOOD, position, 8);
+  const firstDeposit = field.sample(PheromoneType.FOOD, position);
+  field.deposit(PheromoneType.FOOD, position, 8);
+  assert.ok(field.sample(PheromoneType.FOOD, position) > firstDeposit);
+  assert.equal(field.sample(PheromoneType.HOME, position), 0);
 
-  field.evaporate(0.5, 0.1);
-  assert.equal(field.sample(position), 8);
-  for (let index = 0; index < 7; index += 1) field.evaporate(0.5, 0.1);
-  assert.equal(field.sample(position), 0);
+  field.update({ evaporationRate: 0.5, diffusionRate: 0, minimumIntensity: 0.1 });
+  assert.equal(field.sample(PheromoneType.FOOD, position), 8);
+  for (let index = 0; index < 7; index += 1) {
+    field.update({ evaporationRate: 0.5, diffusionRate: 0, minimumIntensity: 0.1 });
+  }
+  assert.equal(field.sample(PheromoneType.FOOD, position), 0);
   assert.deepEqual(field.getStats(), { total: 0, activeCells: 0, maximum: 0 });
 });
 
-test("only a loaded returning ant deposits a distance-weighted trail", () => {
+test("diffusion spreads a gradient and can be disabled", () => {
+  const position = { x: 25, y: 25 };
+  const neighbor = { x: 35, y: 25 };
+  const staticField = new PheromoneField(60, 60, 10);
+  staticField.deposit(PheromoneType.HOME, position, 20);
+  staticField.update({ evaporationRate: 0, diffusionRate: 0, minimumIntensity: 0 });
+  assert.equal(staticField.sample(PheromoneType.HOME, neighbor), 0);
+
+  const diffusedField = new PheromoneField(60, 60, 10);
+  diffusedField.deposit(PheromoneType.HOME, position, 20);
+  diffusedField.update({ evaporationRate: 0, diffusionRate: 0.1, minimumIntensity: 0 });
+  assert.ok(diffusedField.sample(PheromoneType.HOME, neighbor) > 0);
+  assert.ok(diffusedField.sample(PheromoneType.HOME, position) < 20);
+});
+
+test("searchers deposit HOME and loaded returners deposit FOOD", () => {
   const simulation = new Simulation(foragingConfig());
   const ant = simulation.colony.ants[0];
   const system = new PheromoneDepositSystem();
   ant.position = { x: 70, y: 40 };
 
-  assert.equal(system.deposit(
-    ant,
-    simulation.pheromoneField,
-    simulation.colony.nest,
-    simulation.world,
-    1,
-  ), 0);
+  const options = {
+    homeEnabled: true,
+    foodEnabled: true,
+    homeStrength: 1,
+    foodStrength: 2,
+    homeFalloffDistance: 100,
+  };
+  assert.ok(system.deposit(ant, simulation.pheromoneField, options) > 0);
+  assert.ok(simulation.pheromoneField.sample(PheromoneType.HOME, ant.position) > 0);
+  assert.equal(simulation.pheromoneField.sample(PheromoneType.FOOD, ant.position), 0);
   ant.carryingFood = true;
   ant.state = AntState.RETURNING_HOME;
-  assert.ok(system.deposit(
-    ant,
-    simulation.pheromoneField,
-    simulation.colony.nest,
-    simulation.world,
-    1,
-  ) > 0);
+  assert.ok(system.deposit(ant, simulation.pheromoneField, options) > 0);
+  assert.ok(simulation.pheromoneField.sample(PheromoneType.FOOD, ant.position) > 0);
 });
 
 test("a nearby trail biases a searcher without removing exploratory noise", () => {
@@ -179,13 +197,14 @@ test("a nearby trail biases a searcher without removing exploratory noise", () =
     speed: 10,
     colonyId: "C-01",
   });
-  field.deposit({ x: 50, y: 70 }, 10);
+  field.deposit(PheromoneType.FOOD, { x: 50, y: 70 }, 10);
   const sensing = new PheromoneSensingSystem(() => 0.5);
-  const suggestion = sensing.suggestDirection(ant, field, {
+  const suggestion = sensing.suggestDirection(ant, field, PheromoneType.FOOD, {
     distance: 20,
     arc: Math.PI,
     samples: 3,
     minimumSignal: 0.1,
+    revisitPenalty: 0.1,
   });
   assert.ok(Math.abs(suggestion.direction - Math.PI / 2) < 1e-10);
 
@@ -208,11 +227,11 @@ test("a trail to an exhausted source eventually disappears", () => {
   simulation.tick();
   while (simulation.colony.resources === 0) simulation.tick();
   assert.equal(simulation.foodSources[0].active, false);
-  assert.ok(simulation.pheromoneField.getStats().total > 0);
+  assert.ok(simulation.pheromoneField.getStats(PheromoneType.FOOD).total > 0);
 
   for (let index = 0; index < 5_000; index += 1) simulation.tick();
   assert.deepEqual(
-    simulation.pheromoneField.getStats(),
+    simulation.pheromoneField.getStats(PheromoneType.FOOD),
     { total: 0, activeCells: 0, maximum: 0 },
   );
 });
@@ -232,6 +251,24 @@ test("reset clears the pheromone field", () => {
   );
 });
 
+test("reconfigure applies parameters through a deterministic reset", () => {
+  const simulation = new Simulation();
+  simulation.tick();
+  simulation.reconfigure({
+    ...simulation.config,
+    initialAnts: 3,
+    pheromoneDiffusionRate: 0,
+  });
+  assert.equal(simulation.colony.ants.length, 3);
+  assert.equal(simulation.tickCount, 0);
+  assert.equal(simulation.config.pheromoneDiffusionRate, 0);
+  assert.deepEqual(simulation.pheromoneField.getStats(), {
+    total: 0,
+    activeCells: 0,
+    maximum: 0,
+  });
+});
+
 test("identical seeds reproduce ants, resources, and pheromone fields", () => {
   const first = new Simulation();
   const second = new Simulation();
@@ -241,12 +278,25 @@ test("identical seeds reproduce ants, resources, and pheromone fields", () => {
   }
   assert.equal(JSON.stringify(first.colony.ants), JSON.stringify(second.colony.ants));
   assert.equal(first.colony.resources, second.colony.resources);
-  assert.deepEqual(first.pheromoneField.values, second.pheromoneField.values);
+  assert.deepEqual(
+    first.pheromoneField.layer(PheromoneType.FOOD),
+    second.pheromoneField.layer(PheromoneType.FOOD),
+  );
+  assert.deepEqual(
+    first.pheromoneField.layer(PheromoneType.HOME),
+    second.pheromoneField.layer(PheromoneType.HOME),
+  );
 });
 
-test("enabling an empty field does not change the baseline random walk", () => {
-  const withoutPheromones = new Simulation({ ...DEFAULT_CONFIG, pheromonesEnabled: false });
-  const withEmptyField = new Simulation({ ...DEFAULT_CONFIG, pheromonesEnabled: true });
+test("enabling empty pheromone layers does not change the baseline random walk", () => {
+  const baseline = { ...DEFAULT_CONFIG, directHomeNavigation: true };
+  const withoutPheromones = new Simulation({ ...baseline, pheromonesEnabled: false });
+  const withEmptyField = new Simulation({
+    ...baseline,
+    pheromonesEnabled: true,
+    foodPheromonesEnabled: false,
+    homePheromonesEnabled: false,
+  });
   for (let index = 0; index < 100; index += 1) {
     withoutPheromones.tick();
     withEmptyField.tick();
@@ -265,30 +315,62 @@ test("an empty field gives no privileged knowledge of distant food", () => {
   const ant = simulation.colony.ants[0];
   simulation.tick();
   assert.equal(ant.target, null);
-  assert.equal(simulation.pheromoneField.getStats().activeCells, 0);
+  assert.equal(simulation.pheromoneField.getStats(PheromoneType.FOOD).activeCells, 0);
 });
 
 test("the renderer can hide pheromones without changing the field", () => {
   const renderer = new Renderer({ getContext: () => ({}) });
   const field = new PheromoneField(20, 20, 10);
-  field.deposit({ x: 5, y: 5 }, 4);
+  field.deposit(PheromoneType.FOOD, { x: 5, y: 5 }, 4);
+  renderer.setPheromoneMode("HOME");
+  assert.equal(renderer.pheromoneMode, "HOME");
   renderer.setPheromonesVisible(false);
-  assert.equal(renderer.showPheromones, false);
-  assert.equal(field.sample({ x: 5, y: 5 }), 4);
+  assert.equal(renderer.pheromoneMode, "OFF");
+  assert.equal(field.sample(PheromoneType.FOOD, { x: 5, y: 5 }), 4);
 });
 
-test("V0.3 exhausts every source faster than the V0.2 baseline", () => {
-  function run(pheromonesEnabled) {
-    const simulation = new Simulation({ ...DEFAULT_CONFIG, pheromonesEnabled });
+test("a returning behavior has no nest reference and home detection stays local", () => {
+  const behavior = new ReturnHomeBehavior({ update() {} });
+  assert.equal(Object.hasOwn(behavior, "nest"), false);
+  const simulation = new Simulation();
+  const ant = simulation.colony.ants[0];
+  ant.position = { x: 700, y: 100 };
+  const detection = new HomeDetectionSystem();
+  assert.equal(detection.suggestDirection(ant, simulation.colony.nest, 40), null);
+});
+
+test("recent-cell memory remains short", () => {
+  const simulation = new Simulation();
+  for (let index = 0; index < 500; index += 1) simulation.tick();
+  for (const ant of simulation.colony.ants) {
+    assert.ok(ant.recentCells.length <= simulation.config.recentCellMemory);
+  }
+});
+
+test("all four benchmark modes complete and V0.4 returns without GPS", () => {
+  function run(overrides) {
+    const simulation = new Simulation({ ...DEFAULT_CONFIG, ...overrides });
     while (simulation.completionTick === null && simulation.tickCount < 30_000) {
       simulation.tick();
     }
     return simulation;
   }
 
-  const baseline = run(false);
-  const collective = run(true);
-  assert.equal(baseline.colony.resources, 240);
-  assert.equal(collective.colony.resources, 240);
-  assert.ok(collective.completionTick < baseline.completionTick * 0.8);
+  const modes = [
+    run({ pheromonesEnabled: false, directHomeNavigation: true }),
+    run({ homePheromonesEnabled: false, directHomeNavigation: true, pheromoneDiffusionRate: 0 }),
+    run({ directHomeNavigation: false, pheromoneDiffusionRate: 0 }),
+    run({ directHomeNavigation: false }),
+  ];
+  for (const simulation of modes) {
+    const metrics = simulation.getMetrics();
+    assert.equal(simulation.colony.resources, 240);
+    assert.equal(metrics.totalPickups, 240);
+    assert.ok(metrics.totalDistance > 0);
+    assert.ok(metrics.averageReturnTicks > 0);
+    assert.ok(metrics.exploredCells > 0);
+  }
+  assert.ok(modes[1].completionTick < modes[0].completionTick);
+  assert.equal(modes[3].config.directHomeNavigation, false);
+  assert.equal(modes[3].colony.ants.some((ant) => ant.target === modes[3].colony.nest), false);
 });

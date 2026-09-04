@@ -17,5 +17,7 @@ export class MovementSystem {
 
     ant.position = next;
     ant.age += deltaSeconds;
+    ant.distanceSinceNest += distance;
+    return distance;
   }
 }

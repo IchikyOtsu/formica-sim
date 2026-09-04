@@ -78,12 +78,25 @@ document.querySelector("#reset").addEventListener("click", () => {
   updateMetrics();
 });
 
-const pheromoneToggle = document.querySelector("#toggle-pheromones");
-pheromoneToggle.addEventListener("click", () => {
-  const visible = pheromoneToggle.getAttribute("aria-pressed") !== "true";
-  pheromoneToggle.setAttribute("aria-pressed", String(visible));
-  pheromoneToggle.classList.toggle("active", visible);
-  renderer.setPheromonesVisible(visible);
+document.querySelector("#pheromone-layer").addEventListener("change", (event) => {
+  renderer.setPheromoneMode(event.target.value);
+});
+
+document.querySelector("#parameters-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  simulation.reconfigure({
+    ...simulation.config,
+    initialAnts: Number(document.querySelector("#param-ants").value),
+    pheromoneEvaporationRate: Number(document.querySelector("#param-evaporation").value),
+    pheromoneDiffusionRate: Number(document.querySelector("#param-diffusion").value),
+    foodDepositStrength: Number(document.querySelector("#param-food-deposit").value),
+    homeDepositStrength: Number(document.querySelector("#param-home-deposit").value),
+    pheromoneInfluence: Number(document.querySelector("#param-influence").value),
+    homeTrailInfluence: Number(document.querySelector("#param-influence").value),
+    explorationStrength: Number(document.querySelector("#param-exploration").value),
+  });
+  accumulator = 0;
+  updateMetrics();
 });
 
 for (const button of speedButtons) {

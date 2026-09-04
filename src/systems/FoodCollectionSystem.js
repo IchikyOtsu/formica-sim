@@ -15,6 +15,8 @@ export class FoodCollectionSystem {
     ant.carryingFood = true;
     ant.state = AntState.RETURNING_HOME;
     ant.target = null;
+    ant.direction += Math.PI;
+    ant.recentCells = [];
     return true;
   }
 
@@ -27,6 +29,8 @@ export class FoodCollectionSystem {
     ant.state = AntState.SEARCHING_FOOD;
     ant.target = null;
     ant.direction += Math.PI;
+    ant.distanceSinceNest = 0;
+    ant.recentCells = [];
     return true;
   }
 }

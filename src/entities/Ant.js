@@ -17,5 +17,8 @@ export class Ant {
     this.carryingFood = false;
     this.age = 0;
     this.target = null;
+    this.distanceSinceNest = 0;
+    this.recentCells = [];
+    this.returnStartedTick = null;
   }
 }

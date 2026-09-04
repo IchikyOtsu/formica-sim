@@ -19,7 +19,7 @@
           </span>
           <div>
             <p class="eyebrow">Laboratoire de terrain</p>
-            <h1>FORMICA <span>/ SIM V0.3</span></h1>
+            <h1>FORMICA <span>/ SIM V0.4</span></h1>
           </div>
         </div>
         <div class="status-pill"><span></span> Système opérationnel</div>
@@ -72,12 +72,13 @@
             <div><span class="legend-dot return-dot"></span> Fourmi <em>Retour au nid</em></div>
             <div><span class="legend-dot nest-dot"></span> Nid <em>Point d'origine</em></div>
             <div><span class="legend-dot food-dot"></span> Nourriture <em>Ressource</em></div>
-            <div><span class="legend-dot pheromone-dot"></span> Phéromone <em>Piste collective</em></div>
+            <div><span class="legend-dot food-pheromone-dot"></span> FOOD <em>Vers nourriture</em></div>
+            <div><span class="legend-dot home-pheromone-dot"></span> HOME <em>Vers le nid</em></div>
           </div>
 
           <div class="observation">
             <p class="section-label">Observation</p>
-            <p>Les retours chargés déposent une piste volatile. Les chercheuses la suivent avec un biais, sans perdre leur mouvement exploratoire.</p>
+            <p>Les chercheuses déposent HOME. Les retours suivent ce gradient et déposent FOOD, sans GPS global vers le nid.</p>
           </div>
         </aside>
 
@@ -96,7 +97,14 @@
           <div class="controls" role="group" aria-label="Contrôles de simulation">
             <button id="play-pause" class="primary" type="button"><span class="pause-icon" aria-hidden="true"></span><span class="button-text">Pause</span></button>
             <button id="reset" type="button"><span class="reset-icon" aria-hidden="true">↻</span> Reset</button>
-            <button id="toggle-pheromones" class="toggle active" type="button" aria-pressed="true"><span aria-hidden="true">◉</span> Pistes</button>
+            <label class="layer-control">Pistes
+              <select id="pheromone-layer" aria-label="Couche de phéromones visible">
+                <option value="BOTH">Toutes</option>
+                <option value="FOOD">FOOD</option>
+                <option value="HOME">HOME</option>
+                <option value="OFF">Masquées</option>
+              </select>
+            </label>
             <div class="speed-control">
               <span>Vitesse</span>
               <button class="speed active" data-speed="1" type="button">×1</button>
@@ -105,6 +113,19 @@
             </div>
             <p class="sim-time"><span>Temps simulé</span><strong id="sim-time">00:00:00.0</strong></p>
           </div>
+          <details class="parameters">
+            <summary>Paramètres de simulation <span>Appliqués au prochain reset</span></summary>
+            <form id="parameters-form">
+              <label>Fourmis<input id="param-ants" type="number" min="1" max="300" step="1" value="50" /></label>
+              <label>Évaporation<input id="param-evaporation" type="number" min="0" max="0.1" step="0.001" value="0.003" /></label>
+              <label>Diffusion<input id="param-diffusion" type="number" min="0" max="0.2" step="0.0001" value="0.0005" /></label>
+              <label>Dépôt FOOD<input id="param-food-deposit" type="number" min="0" max="10" step="0.1" value="1.6" /></label>
+              <label>Dépôt HOME<input id="param-home-deposit" type="number" min="0" max="10" step="0.1" value="1.1" /></label>
+              <label>Influence piste<input id="param-influence" type="number" min="0" max="1" step="0.01" value="0.62" /></label>
+              <label>Exploration<input id="param-exploration" type="number" min="0" max="3" step="0.05" value="1.15" /></label>
+              <button type="submit">Appliquer + Reset</button>
+            </form>
+          </details>
         </section>
       </section>
     </main>

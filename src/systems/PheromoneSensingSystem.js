@@ -3,7 +3,7 @@ export class PheromoneSensingSystem {
     this.random = random;
   }
 
-  suggestDirection(ant, field, options) {
+  suggestDirection(ant, field, type, options) {
     const {
       distance,
       arc,
@@ -20,9 +20,11 @@ export class PheromoneSensingSystem {
         x: ant.position.x + Math.cos(direction) * distance,
         y: ant.position.y + Math.sin(direction) * distance,
       };
-      const strength = field.sample(position);
+      const strength = field.sample(type, position);
       if (strength < minimumSignal) continue;
-      const weight = strength * strength;
+      const sampledCell = field.indexAt(position);
+      const recentlyVisited = ant.recentCells.includes(sampledCell);
+      const weight = strength * strength * (recentlyVisited ? options.revisitPenalty : 1);
       totalWeight += weight;
       candidates.push({ direction, strength, weight });
     }
