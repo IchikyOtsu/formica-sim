@@ -62,8 +62,8 @@ npm run experiment -- environment --seeds=20 --ticks=40000
 
 ```text
 src/
-├── analytics/{TimeSeries,MetricsRecorder,EventLog,RunSummary}.js
-├── analytics/{RunExporter,ReplayController,TimeSeriesRenderer}.js
+├── observability/{TimeSeries,MetricsRecorder,EventLog,RunSummary}.js
+├── observability/{RunExporter,ReplayController,TimeSeriesRenderer}.js
 ├── behaviors/{RandomWalk,SearchFoodBehavior,ReturnHomeBehavior}.js
 ├── entities/{Ant,Colony,FoodSource,Nest,Queen,Brood}.js
 ├── environment/{Season,EnvironmentConfig,DangerZone}.js

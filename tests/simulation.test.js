@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { EventLog } from "../src/analytics/EventLog.js";
-import { MetricsRecorder } from "../src/analytics/MetricsRecorder.js";
-import { ReplayController } from "../src/analytics/ReplayController.js";
-import { createRunExport, seriesToCsv } from "../src/analytics/RunExporter.js";
-import { TimeSeries } from "../src/analytics/TimeSeries.js";
+import { EventLog } from "../src/observability/EventLog.js";
+import { MetricsRecorder } from "../src/observability/MetricsRecorder.js";
+import { ReplayController } from "../src/observability/ReplayController.js";
+import { createRunExport, seriesToCsv } from "../src/observability/RunExporter.js";
+import { TimeSeries } from "../src/observability/TimeSeries.js";
 import { SearchFoodBehavior } from "../src/behaviors/SearchFoodBehavior.js";
 import { ReturnHomeBehavior } from "../src/behaviors/ReturnHomeBehavior.js";
 import { Ant, AntState } from "../src/entities/Ant.js";

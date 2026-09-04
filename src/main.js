@@ -1,15 +1,15 @@
-import { EventLog } from "./analytics/EventLog.js";
-import { MetricsRecorder } from "./analytics/MetricsRecorder.js";
-import { ReplayController } from "./analytics/ReplayController.js";
-import { createRunExport, downloadText, seriesToCsv } from "./analytics/RunExporter.js";
-import { TimeSeriesRenderer } from "./analytics/TimeSeriesRenderer.js";
+import { EventLog } from "./observability/EventLog.js";
+import { MetricsRecorder } from "./observability/MetricsRecorder.js";
+import { ReplayController } from "./observability/ReplayController.js";
+import { createRunExport, downloadText, seriesToCsv } from "./observability/RunExporter.js";
+import { TimeSeriesRenderer } from "./observability/TimeSeriesRenderer.js";
 import { SCENARIO_PRESETS, configForPreset } from "./experiments/ScenarioPresets.js";
 import { Renderer } from "./rendering/Renderer.js";
 import { Simulation } from "./simulation/Simulation.js";
 import { DEFAULT_CONFIG } from "./simulation/SimulationConfig.js";
 
 const simulation = new Simulation();
-const APP_VERSION = "0.9.1";
+const APP_VERSION = "0.9.2";
 const renderer = new Renderer(document.querySelector("#world"));
 const playPause = document.querySelector("#play-pause");
 const buttonText = playPause.querySelector(".button-text");

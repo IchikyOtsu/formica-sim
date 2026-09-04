@@ -1,6 +1,6 @@
-import { EventLog } from "../analytics/EventLog.js";
-import { MetricsRecorder } from "../analytics/MetricsRecorder.js";
-import { createRunSummary } from "../analytics/RunSummary.js";
+import { EventLog } from "../observability/EventLog.js";
+import { MetricsRecorder } from "../observability/MetricsRecorder.js";
+import { createRunSummary } from "../observability/RunSummary.js";
 import { Simulation } from "../simulation/Simulation.js";
 
 export class ExperimentRunner {
