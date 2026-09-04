@@ -14,6 +14,9 @@ import { RaidDecisionSystem } from "../src/systems/RaidDecisionSystem.js";
 import { TacticalOverlaySystem, OverlayType, DEFAULT_OVERLAY_VISIBILITY } from "../src/systems/TacticalOverlaySystem.js";
 import { NestChamberType } from "../src/nest/NestChamber.js";
 import { NestInterior } from "../src/nest/NestInterior.js";
+import { NestTask } from "../src/nest/NestTask.js";
+import { NestTaskSystem } from "../src/nest/NestTaskSystem.js";
+import { BroodDemandSystem } from "../src/systems/BroodDemandSystem.js";
 import { Brood, BroodStage } from "../src/entities/Brood.js";
 import { FoodSource, FoodSourceState } from "../src/entities/FoodSource.js";
 import { DangerZone } from "../src/environment/DangerZone.js";
@@ -3007,4 +3010,197 @@ test("12. an ant can only ever enter its own colony's nest, never a foreign one"
       }
     }
   }
+});
+
+// V1.5.2 — Tâches internes du nid : NestTaskSystem/BroodDemandSystem
+// décident QUOI faire, Simulation gère toujours OÙ (NestNavigationSystem)
+// et les effets d'arrivée, exactement comme en V1.5.1.
+
+function starvedLarva(id, caste = Caste.WORKER) {
+  const brood = new Brood({ id, caste });
+  brood.stage = BroodStage.LARVA;
+  brood.starved = true;
+  return brood;
+}
+
+test("V1.5.2.1 depositing a carried load always outranks feeding the brood", () => {
+  const decide = new NestTaskSystem().decide;
+  const ant = new Ant({ id: "A", position: { x: 0, y: 0 }, direction: 0, speed: 1, colonyId: "A" });
+  ant.carryingFood = true;
+  ant.carryingFoodAmount = 1;
+  const colony = { brood: [starvedLarva("B-1")], foodStock: 100 };
+  const config = { nestCaregiverRatio: 1, nestBroodFeedStockThreshold: 0 };
+  const task = decide(ant, colony, config, {
+    needsFood: false,
+    broodDemand: { hungryLarvae: 1, foodDemand: 1 },
+    activeCaregivers: 0,
+  });
+  assert.equal(task, NestTask.GO_TO_STORAGE);
+});
+
+test("V1.5.2.2 a low-energy ant rests before ever considering the brood", () => {
+  const decide = new NestTaskSystem().decide;
+  const ant = new Ant({ id: "A", position: { x: 0, y: 0 }, direction: 0, speed: 1, colonyId: "A" });
+  const colony = { brood: [starvedLarva("B-1")], foodStock: 100 };
+  const config = { nestCaregiverRatio: 1, nestBroodFeedStockThreshold: 0 };
+  const task = decide(ant, colony, config, {
+    needsFood: true,
+    broodDemand: { hungryLarvae: 1, foodDemand: 1 },
+    activeCaregivers: 0,
+  });
+  assert.equal(task, NestTask.GO_TO_REST);
+});
+
+test("V1.5.2.3 a soldier is never assigned FEED_BROOD nor TEND_BROOD", () => {
+  const decide = new NestTaskSystem().decide;
+  const soldier = new Ant({
+    id: "S", position: { x: 0, y: 0 }, direction: 0, speed: 1, colonyId: "A", caste: Caste.SOLDIER,
+  });
+  const colony = { brood: [starvedLarva("B-1")], foodStock: 100 };
+  const config = { nestCaregiverRatio: 1, nestBroodFeedStockThreshold: 0 };
+  const task = decide(soldier, colony, config, {
+    needsFood: false,
+    broodDemand: { hungryLarvae: 1, foodDemand: 1 },
+    activeCaregivers: 0,
+  });
+  assert.equal(task, NestTask.EXIT_NEST);
+});
+
+test("V1.5.2.4 a worker exits once the brood has no need at all", () => {
+  const decide = new NestTaskSystem().decide;
+  const ant = new Ant({ id: "A", position: { x: 0, y: 0 }, direction: 0, speed: 1, colonyId: "A" });
+  const colony = { brood: [], foodStock: 100 };
+  const config = { nestCaregiverRatio: 1, nestBroodFeedStockThreshold: 0 };
+  const task = decide(ant, colony, config, {
+    needsFood: false,
+    broodDemand: { hungryLarvae: 0, foodDemand: 0 },
+    activeCaregivers: 0,
+  });
+  assert.equal(task, NestTask.EXIT_NEST);
+});
+
+test("V1.5.2.5 the caregiver cap is respected: no more assignment once the cap is reached", () => {
+  const decide = new NestTaskSystem().decide;
+  const ant = new Ant({ id: "A", position: { x: 0, y: 0 }, direction: 0, speed: 1, colonyId: "A" });
+  const colony = { brood: [starvedLarva("B-1"), starvedLarva("B-2")], foodStock: 100 };
+  // ratio 0.34 on 2 larvae -> cap = max(1, ceil(0.68)) = 1
+  const config = { nestCaregiverRatio: 0.34, nestBroodFeedStockThreshold: 0 };
+  const atCap = decide(ant, colony, config, {
+    needsFood: false,
+    broodDemand: { hungryLarvae: 2, foodDemand: 2 },
+    activeCaregivers: 1,
+  });
+  assert.equal(atCap, NestTask.EXIT_NEST, "cap already reached, this worker must not pile onto the brood");
+});
+
+test("V1.5.2.6 BroodDemandSystem counts only starved larvae, never eggs, pupae or well-fed larvae", () => {
+  const colony = {
+    brood: [
+      starvedLarva("L-hungry"),
+      (() => { const b = new Brood({ id: "L-fed" }); b.stage = BroodStage.LARVA; b.starved = false; return b; })(),
+      (() => { const b = new Brood({ id: "E-1" }); b.stage = BroodStage.EGG; b.starved = true; return b; })(),
+      (() => { const b = new Brood({ id: "P-1" }); b.stage = BroodStage.PUPA; b.starved = true; return b; })(),
+    ],
+  };
+  const demand = new BroodDemandSystem().evaluate(colony, { larvaFoodPerTick: 0.5 });
+  assert.equal(demand.hungryLarvae, 1);
+  assert.equal(demand.foodDemand, 0.5);
+});
+
+test("V1.5.2.7 a FEED_BROOD ant picks up food only at STORAGE, and delivers it only at BROOD", () => {
+  const simulation = new Simulation(nestInteriorConfig({
+    reproductionEnabled: false,
+    nestBroodFeedStockThreshold: 0,
+    nestCaregiverRatio: 1,
+  }));
+  const colonyA = simulation.colonies[0];
+  colonyA.brood.push(starvedLarva("B-1"));
+  colonyA.foodStock = 20; // test-only fabricated stock, so there is something to pick up
+  simulation.initialColonyFoodStock += 20;
+  const ant = colonyA.ants[0];
+  simulation.nestTransitionSystem.enter(ant, colonyA, simulation.nestInteriors.get(colonyA.id));
+
+  const stockBefore = colonyA.foodStock;
+  let pickedUp = false;
+  let delivered = false;
+  for (let tick = 0; tick < 200; tick += 1) {
+    simulation.tick();
+    if (!pickedUp && ant.internalFoodCargo > 0) {
+      assert.equal(ant.nestChamberId, NestChamberType.STORAGE, "pickup happens exactly at STORAGE arrival");
+      assert.ok(colonyA.foodStock < stockBefore, "the carried amount left the general stock immediately");
+      pickedUp = true;
+    }
+    if (pickedUp && !delivered && ant.internalFoodCargo === 0 && colonyA.broodFoodBuffer > 0) {
+      assert.equal(ant.nestChamberId, NestChamberType.BROOD, "delivery happens exactly at BROOD arrival");
+      delivered = true;
+      break;
+    }
+  }
+  assert.equal(pickedUp, true);
+  assert.equal(delivered, true);
+});
+
+test("V1.5.2.8 nestInteriorEnabled = false never touches internalFoodCargo or broodFoodBuffer", () => {
+  const simulation = new Simulation(multiColonyConfig({ nestInteriorEnabled: false }));
+  for (let tick = 0; tick < 2000; tick += 1) {
+    simulation.tick();
+    for (const colony of simulation.colonies) {
+      assert.equal(colony.broodFoodBuffer, 0);
+      for (const ant of colony.ants) assert.equal(ant.internalFoodCargo, 0);
+    }
+  }
+});
+
+test("V1.5.2.9 food conservation stays exact through a forced feed-the-brood cycle", () => {
+  const simulation = new Simulation(nestInteriorConfig({
+    reproductionEnabled: false,
+    nestBroodFeedStockThreshold: 0,
+    nestCaregiverRatio: 1,
+  }));
+  const colonyA = simulation.colonies[0];
+  colonyA.brood.push(starvedLarva("B-1"), starvedLarva("B-2"));
+  colonyA.foodStock = 20; // test-only fabricated stock, so there is something to pick up
+  simulation.initialColonyFoodStock += 20;
+  for (const ant of colonyA.ants.slice(0, 3)) {
+    simulation.nestTransitionSystem.enter(ant, colonyA, simulation.nestInteriors.get(colonyA.id));
+  }
+  for (let tick = 0; tick < 3000; tick += 1) {
+    simulation.tick();
+    assertSimulationInvariants(simulation);
+  }
+  assert.ok(colonyA.broodFoodDelivered > 0, "the scenario must actually have exercised delivery at least once");
+});
+
+test("V1.5.2.10 internal-tasks replay is exact for an identical seed and configuration", () => {
+  const config = nestInteriorConfig({
+    reproductionEnabled: false,
+    nestBroodFeedStockThreshold: 0,
+    nestCaregiverRatio: 1,
+  });
+  const runOnce = () => {
+    const simulation = new Simulation(config);
+    const colonyA = simulation.colonies[0];
+    colonyA.brood.push(starvedLarva("B-1"), starvedLarva("B-2"));
+    colonyA.foodStock = 20;
+    simulation.initialColonyFoodStock += 20;
+    for (const ant of colonyA.ants.slice(0, 3)) {
+      simulation.nestTransitionSystem.enter(ant, colonyA, simulation.nestInteriors.get(colonyA.id));
+    }
+    for (let tick = 0; tick < 1500; tick += 1) simulation.tick();
+    return simulation.colonies.map((colony) => ({
+      foodStock: colony.foodStock,
+      broodFoodBuffer: colony.broodFoodBuffer,
+      broodFoodDelivered: colony.broodFoodDelivered,
+      ants: colony.ants.map((ant) => ({
+        locationType: ant.locationType,
+        nestChamberId: ant.nestChamberId,
+        nestTask: ant.nestTask,
+        internalFoodCargo: ant.internalFoodCargo,
+        position: ant.position,
+        nestPosition: ant.nestPosition,
+        energy: ant.energy,
+      })),
+    }));
+  };
+  assert.deepEqual(runOnce(), runOnce());
 });

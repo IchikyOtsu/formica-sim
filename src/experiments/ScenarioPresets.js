@@ -37,6 +37,7 @@ export const SCENARIO_CATEGORIES = Object.freeze([
   { id: "combat", label: "Combat (V1.2)" },
   { id: "castes", label: "Castes & soldats (V1.3)" },
   { id: "raids", label: "Raids (V1.4)" },
+  { id: "nest", label: "Nid intérieur (V1.5)" },
   { id: "complete", label: "Version complète (V1.4)" },
 ]);
 
@@ -163,12 +164,30 @@ export const SCENARIO_PRESETS = Object.freeze([
     id: "nest-interior",
     name: "Vue intérieure du nid",
     description: "Une seule colonie : bascule sur « Vue → Nid C-01 » pour suivre une ouvrière entrer, traverser l'intérieur, déposer sa récolte au Stock, se reposer si besoin, puis ressortir.",
-    category: "competition",
+    category: "nest",
     seed: 1847,
     duration: 20_000,
     config: {
       nestInteriorEnabled: true,
       antSpeed: 20,
+    },
+  },
+  {
+    id: "nest-tasks",
+    name: "Vie intérieure du nid",
+    description: "Beaucoup de couvain, stock modeste : les ouvrières se répartissent entre dépôt, repos, nourrissage et soin du couvain avant de ressortir. Bascule sur « Vue → Nid C-01 ».",
+    category: "nest",
+    seed: 2024,
+    duration: 25_000,
+    config: {
+      nestInteriorEnabled: true,
+      antSpeed: 20,
+      initialFoodStock: 25,
+      maxBrood: 20,
+      reproductionFoodThreshold: 10,
+      eggFoodCost: 0.3,
+      queenLayingCooldownTicks: 400,
+      nestCaregiverRatio: 0.4,
     },
   },
   {

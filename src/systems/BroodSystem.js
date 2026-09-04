@@ -32,10 +32,18 @@ export class BroodSystem {
       } else if (brood.stage === BroodStage.LARVA) {
         const isSoldier = brood.caste === Caste.SOLDIER;
         const needed = config.larvaFoodPerTick * (isSoldier ? config.soldierLarvaFoodMultiplier : 1);
-        const consumed = colony.consumeFood(needed);
+        let consumed = 0;
+        if (colony.broodFoodBuffer > 0) {
+          const fromBuffer = Math.min(needed, colony.broodFoodBuffer);
+          colony.broodFoodBuffer -= fromBuffer;
+          colony.consumedFood += fromBuffer;
+          consumed += fromBuffer;
+        }
+        if (consumed < needed) consumed += colony.consumeFood(needed - consumed);
         brood.foodConsumed += consumed;
         this.broodFoodConsumed += consumed;
         if (isSoldier) this.militaryFoodConsumed += consumed;
+        brood.starved = consumed + Number.EPSILON < needed;
         if (consumed + Number.EPSILON >= needed) {
           this.advanceFreeStage(
             brood,

@@ -15,5 +15,6 @@ export class Brood {
     this.developmentProgress = 0;
     this.foodConsumed = 0;
     this.caste = caste;
+    this.starved = false;
   }
 }

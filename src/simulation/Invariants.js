@@ -26,6 +26,9 @@ export function inspectSimulationInvariants(simulation) {
     if (ant.raidCargo > EPSILON && ant.raidId === null && ant.state !== AntState.DEAD) {
       add("raid-cargo-without-raid", ant.id);
     }
+    if (ant.internalFoodCargo < -EPSILON) {
+      add("internal-food-cargo-bounds", `${ant.id}: ${ant.internalFoodCargo}`);
+    }
     if (ant.state !== AntState.DEAD && ant.health <= 0) {
       add("living-worker-positive-health", `${ant.id}: ${ant.health}`);
     }
@@ -53,6 +56,9 @@ export function inspectSimulationInvariants(simulation) {
     if (colony.foodStock < -EPSILON) {
       add("non-negative-food-stock", `${colony.id}: ${colony.foodStock}`);
     }
+    if (colony.broodFoodBuffer < -EPSILON) {
+      add("non-negative-brood-food-buffer", `${colony.id}: ${colony.broodFoodBuffer}`);
+    }
     if (colony.brood.length > config.maxBrood) {
       add("brood-limit", `${colony.id}: ${colony.brood.length} > ${config.maxBrood}`);
     }
@@ -76,10 +82,10 @@ export function inspectSimulationInvariants(simulation) {
     + simulation.regeneratedFood
     + simulation.spawnedFood;
   const accounted = simulation.colonies.reduce((sum, colony) => (
-    sum + colony.foodStock + colony.consumedFood
+    sum + colony.foodStock + colony.consumedFood + colony.broodFoodBuffer
   ), 0)
     + simulation.foodSources.reduce((sum, source) => sum + source.quantity, 0)
-    + ants.reduce((sum, ant) => sum + ant.carryingFoodAmount + ant.raidCargo, 0)
+    + ants.reduce((sum, ant) => sum + ant.carryingFoodAmount + ant.raidCargo + ant.internalFoodCargo, 0)
     + simulation.lostFood
     + simulation.expiredFood
     + simulation.removedColonyFood;

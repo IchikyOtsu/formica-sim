@@ -233,6 +233,8 @@ function renderColonyMetrics(colonies) {
       ["Butin perdu au sol", colony.foodDropped.toFixed(1)],
       ["Dehors / Dans le nid", `${colony.antsOutside} / ${colony.antsInsideNest}`],
       ["Au stockage", colony.antsInStorage],
+      ["Nourrices / Soigneuses", `${colony.antsFeedingBrood} / ${colony.antsTendingBrood}`],
+      ["Nourriture livrée au couvain", colony.broodFoodDelivered.toFixed(1)],
     ];
     for (const [label, value] of rows) {
       const term = document.createElement("dt");

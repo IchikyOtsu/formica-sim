@@ -62,7 +62,8 @@ export const CONFIG_SECTIONS = Object.freeze({
   ]),
   nestInterior: Object.freeze([
     "nestInteriorEnabled", "nestInteriorSpeed", "nestChamberArrivalRadius",
-    "nestTransitionCooldownTicks",
+    "nestTransitionCooldownTicks", "nestCaregiverRatio", "nestBroodFeedStockThreshold",
+    "nestInternalFoodCarry", "nestTendBroodTicks", "nestBroodCareBonus",
   ]),
   demography: Object.freeze([
     "initialFoodStock", "reproductionEnabled", "queenLayingCooldownTicks",
@@ -151,6 +152,7 @@ export function validateFlatConfig(config) {
     "threatPressureContactWeight", "threatPressureDeathWeight", "threatPressureAlarmWeight",
     "threatPressureRatioScale", "nestDefenseAlarmStrength", "threatPressureNestProximityWeight",
     "raidCarryCapacity", "minStockToRaid",
+    "nestBroodFeedStockThreshold", "nestInternalFoodCarry", "nestBroodCareBonus",
   ]) {
     if (config[key] < 0) fail(key, "ne peut pas être négatif");
   }
@@ -161,7 +163,7 @@ export function validateFlatConfig(config) {
     "combatThreatenThreshold", "combatAttackThreshold", "combatFleeHealthRatio",
     "soldierCombatAttackThreshold", "soldierCombatThreatenThreshold",
     "soldierEncounterAvoidanceThreshold", "soldierCombatFleeHealthRatio",
-    "casteSoldierRatioCap", "threatPressureDecay",
+    "casteSoldierRatioCap", "threatPressureDecay", "nestCaregiverRatio",
   ]) {
     if (config[key] < 0 || config[key] > 1) fail(key, "doit être compris entre 0 et 1");
   }
@@ -191,6 +193,9 @@ export function validateFlatConfig(config) {
   }
   if (!Number.isInteger(config.nestTransitionCooldownTicks) || config.nestTransitionCooldownTicks < 0) {
     fail("nestTransitionCooldownTicks", "entier positif ou nul attendu");
+  }
+  if (!Number.isInteger(config.nestTendBroodTicks) || config.nestTendBroodTicks <= 0) {
+    fail("nestTendBroodTicks", "entier positif attendu");
   }
   if (!Number.isInteger(config.seed)) fail("seed", "entier attendu");
   if (!Number.isInteger(config.territoryUpdateInterval)) {

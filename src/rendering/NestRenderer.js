@@ -1,5 +1,6 @@
 import { NestChamberType } from "../nest/NestChamber.js";
 import { AntState } from "../entities/Ant.js";
+import { NestTask } from "../nest/NestTask.js";
 
 const CHAMBER_LABELS = Object.freeze({
   [NestChamberType.ENTRANCE]: "Entrée",
@@ -101,6 +102,17 @@ export class NestRenderer {
       if (ant.locationType !== "NEST" || ant.state === AntState.DEAD || !ant.nestPosition) continue;
       ctx.save();
       ctx.translate(ant.nestPosition.x, ant.nestPosition.y);
+      if (ant.nestTask === NestTask.TEND_BROOD && ant.nestChamberId === NestChamberType.BROOD) {
+        ctx.beginPath();
+        ctx.arc(0, 0, 3, 0, Math.PI * 2);
+        ctx.strokeStyle = "rgba(232, 195, 74, 0.55)";
+        ctx.lineWidth = 0.7;
+        ctx.stroke();
+      }
+      if (ant.internalFoodCargo > 0) {
+        ctx.fillStyle = "rgba(232, 195, 74, 0.85)";
+        ctx.beginPath(); ctx.arc(-1.6, 0, 0.7, 0, Math.PI * 2); ctx.fill();
+      }
       ctx.beginPath();
       ctx.arc(0, 0, ant.state === AntState.RESTING ? 1.6 : 1.2, 0, Math.PI * 2);
       ctx.fillStyle = ant.state === AntState.RESTING ? "#8fbf5a" : colony.color;

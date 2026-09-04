@@ -33,6 +33,8 @@ import { NestChamberType } from "../nest/NestChamber.js";
 import { NestTask } from "../nest/NestTask.js";
 import { NestNavigationSystem } from "../nest/NestNavigationSystem.js";
 import { NestTransitionSystem } from "../nest/NestTransitionSystem.js";
+import { NestTaskSystem } from "../nest/NestTaskSystem.js";
+import { BroodDemandSystem } from "../systems/BroodDemandSystem.js";
 import { normalizeConfig, toVersionedConfig } from "../config/ConfigSchema.js";
 import { DEFAULT_CONFIG } from "./SimulationConfig.js";
 import { ColonyPheromoneFields } from "./ColonyPheromoneFields.js";
@@ -84,6 +86,8 @@ export class Simulation {
     this.raidDecisionSystem = new RaidDecisionSystem();
     this.nestNavigationSystem = new NestNavigationSystem();
     this.nestTransitionSystem = new NestTransitionSystem();
+    this.nestTaskSystem = new NestTaskSystem();
+    this.broodDemandSystem = new BroodDemandSystem();
     this.reset();
   }
 
@@ -311,10 +315,21 @@ export class Simulation {
       this.detectEnemyNests(colony, colonyConfig);
       this.detectNestThreats(colony, colonyConfig);
       this.evaluateAutoRaid(colony, colonyConfig);
+      const broodDemand = colonyConfig.nestInteriorEnabled
+        ? this.broodDemandSystem.evaluate(colony, colonyConfig)
+        : null;
+      let activeCaregivers = colonyConfig.nestInteriorEnabled
+        ? colony.ants.filter((candidate) => candidate.locationType === "NEST"
+          && (candidate.nestTask === NestTask.FEED_BROOD || candidate.nestTask === NestTask.TEND_BROOD)).length
+        : 0;
       for (const ant of colony.ants) {
       if (ant.state === AntState.DEAD) continue;
       if (ant.locationType === "NEST") {
-        this.updateNestAnt(ant, colony, colonyConfig, deltaSeconds);
+        const caregiverBefore = ant.nestTask === NestTask.FEED_BROOD || ant.nestTask === NestTask.TEND_BROOD;
+        this.updateNestAnt(ant, colony, colonyConfig, deltaSeconds, broodDemand, activeCaregivers);
+        const caregiverAfter = ant.nestTask === NestTask.FEED_BROOD || ant.nestTask === NestTask.TEND_BROOD;
+        if (caregiverAfter && !caregiverBefore) activeCaregivers += 1;
+        else if (!caregiverAfter && caregiverBefore) activeCaregivers -= 1;
         continue;
       }
       if (this.config.combatEnabled && ant.combatCooldown > 0) ant.combatCooldown -= 1;
@@ -465,6 +480,7 @@ export class Simulation {
           if (colonyConfig.nestInteriorEnabled) {
             if (ant.nestTransitionCooldown <= 0) {
               this.nestTransitionSystem.enter(ant, colony, this.nestInteriors.get(colony.id));
+              this.emitEvent("ANT_ENTERED_NEST", { antId: ant.id, colonyId: colony.id });
             }
           } else {
             if (ant.raidCargo > 0) this.depositLoot(ant, colony);
@@ -517,10 +533,15 @@ export class Simulation {
       }
     }
       const eggsBeforeUpdate = colony.queen.eggsLaid;
+      const activeTenders = colonyConfig.nestInteriorEnabled
+        ? colony.ants.filter((candidate) => candidate.nestTask === NestTask.TEND_BROOD
+          && candidate.nestChamberId === NestChamberType.BROOD).length
+        : 0;
+      const broodCareFactor = 1 + Math.min(activeTenders, colony.brood.length) * colonyConfig.nestBroodCareBonus;
       const emergedBroods = this.broodSystems.get(colony.id).update(
         colony,
         colonyConfig,
-        this.currentEnvironment.broodDevelopmentMultiplier,
+        this.currentEnvironment.broodDevelopmentMultiplier * broodCareFactor,
       );
       if (colony.queen.eggsLaid > eggsBeforeUpdate) {
         this.emitEvent("QUEEN_LAID_EGG", { queenId: colony.queen.id, colonyId: colony.id });
@@ -626,6 +647,11 @@ export class Simulation {
     ant.returnReason = null;
     if (ant.raidCargo > 0) this.dropLoot(ant, colony);
     if (ant.raidId) this.resolveRaidMemberOutcome(ant, colony, "DEAD");
+    if (ant.internalFoodCargo > 0) {
+      this.lostFood += ant.internalFoodCargo;
+      colony.lostFood += ant.internalFoodCargo;
+      ant.internalFoodCargo = 0;
+    }
     if (ant.locationType === "NEST") {
       this.nestInteriors.get(colony.id)?.removeAnt(ant);
       ant.locationType = "WORLD";
@@ -633,6 +659,7 @@ export class Simulation {
       ant.nestPosition = null;
       ant.nestChamberId = null;
       ant.nestTask = "NONE";
+      ant.nestTendTicksRemaining = 0;
     }
   }
 
@@ -779,7 +806,7 @@ export class Simulation {
     return Math.hypot(dx, dy);
   }
 
-  updateNestAnt(ant, colony, colonyConfig, deltaSeconds) {
+  updateNestAnt(ant, colony, colonyConfig, deltaSeconds, broodDemand, activeCaregivers) {
     const interior = this.nestInteriors.get(colony.id);
     ant.age += deltaSeconds;
     if (ant.nestTransitionCooldown > 0) ant.nestTransitionCooldown -= 1;
@@ -802,13 +829,19 @@ export class Simulation {
       this.metabolism.feedAtNest(ant, colony, colonyConfig.foodEnergyValue, colonyConfig.resumeEnergyThreshold);
       if (ant.state === AntState.RESTING) return;
       ant.state = AntState.IN_NEST;
-      ant.nestTask = NestTask.EXIT_NEST;
+      ant.nestTask = NestTask.NONE;
+      this.emitEvent("ANT_FINISHED_REST", { antId: ant.id, colonyId: colony.id });
       return;
     }
 
-    if (ant.nestTask === NestTask.NONE) this.assignNestTask(ant, colony);
+    if (ant.nestTask === NestTask.TEND_BROOD && ant.nestChamberId === NestChamberType.BROOD) {
+      this.tendBrood(ant, colony);
+      return;
+    }
 
-    const targetType = this.chamberTypeForTask(ant.nestTask);
+    if (ant.nestTask === NestTask.NONE) this.assignNestTask(ant, colony, colonyConfig, broodDemand, activeCaregivers);
+
+    const targetType = this.chamberTypeForAnt(ant);
     const chamber = interior.getChamber(targetType);
     const arrived = this.nestNavigationSystem.moveToward(
       ant,
@@ -821,36 +854,58 @@ export class Simulation {
     interior.moveAntToChamber(ant, targetType);
 
     if (targetType === NestChamberType.STORAGE) {
-      this.depositAtStorage(ant, colony);
-      ant.state = AntState.IN_NEST;
-      ant.nestTask = this.metabolism.needsFood(ant) ? NestTask.GO_TO_REST : NestTask.EXIT_NEST;
+      if (ant.nestTask === NestTask.FEED_BROOD) {
+        this.pickupInternalFood(ant, colony, colonyConfig);
+        ant.state = AntState.IN_NEST;
+      } else {
+        this.depositAtStorage(ant, colony);
+        ant.state = AntState.IN_NEST;
+        ant.nestTask = NestTask.NONE;
+      }
     } else if (targetType === NestChamberType.REST) {
       ant.state = AntState.RESTING;
+      this.emitEvent("ANT_STARTED_REST", { antId: ant.id, colonyId: colony.id });
       this.metabolism.feedAtNest(ant, colony, colonyConfig.foodEnergyValue, colonyConfig.resumeEnergyThreshold);
       if (ant.state !== AntState.RESTING) {
         ant.state = AntState.IN_NEST;
-        ant.nestTask = NestTask.EXIT_NEST;
+        ant.nestTask = NestTask.NONE;
+        this.emitEvent("ANT_FINISHED_REST", { antId: ant.id, colonyId: colony.id });
+      }
+    } else if (targetType === NestChamberType.BROOD) {
+      if (ant.nestTask === NestTask.FEED_BROOD) {
+        this.deliverBroodFood(ant, colony);
+        ant.state = AntState.IN_NEST;
+        ant.nestTask = NestTask.NONE;
+      } else if (ant.nestTask === NestTask.TEND_BROOD) {
+        ant.state = AntState.IN_NEST;
+        ant.nestTendTicksRemaining = colonyConfig.nestTendBroodTicks;
       }
     } else if (targetType === NestChamberType.ENTRANCE) {
       this.nestTransitionSystem.exit(ant, colony, interior, colonyConfig, this.birthRandom);
+      this.emitEvent("ANT_EXITED_NEST", { antId: ant.id, colonyId: colony.id });
     }
   }
 
-  assignNestTask(ant, colony) {
-    if (ant.carryingFood || ant.raidCargo > 0) {
-      ant.nestTask = NestTask.GO_TO_STORAGE;
-    } else if (this.metabolism.needsFood(ant)) {
-      ant.nestTask = NestTask.GO_TO_REST;
-    } else {
-      ant.nestTask = NestTask.EXIT_NEST;
-    }
+  tendBrood(ant, colony) {
+    ant.nestTendTicksRemaining -= 1;
+    if (ant.nestTendTicksRemaining <= 0) ant.nestTask = NestTask.NONE;
   }
 
-  chamberTypeForTask(task) {
-    switch (task) {
+  assignNestTask(ant, colony, colonyConfig, broodDemand, activeCaregivers) {
+    ant.nestTask = this.nestTaskSystem.decide(ant, colony, colonyConfig, {
+      needsFood: this.metabolism.needsFood(ant),
+      broodDemand: broodDemand ?? { hungryLarvae: 0, foodDemand: 0 },
+      activeCaregivers: activeCaregivers ?? 0,
+    });
+  }
+
+  chamberTypeForAnt(ant) {
+    switch (ant.nestTask) {
       case NestTask.GO_TO_STORAGE: return NestChamberType.STORAGE;
       case NestTask.GO_TO_REST: return NestChamberType.REST;
-      case NestTask.GO_TO_BROOD: return NestChamberType.BROOD;
+      case NestTask.FEED_BROOD:
+        return ant.internalFoodCargo > 0 ? NestChamberType.BROOD : NestChamberType.STORAGE;
+      case NestTask.TEND_BROOD: return NestChamberType.BROOD;
       default: return NestChamberType.ENTRANCE;
     }
   }
@@ -871,6 +926,23 @@ export class Simulation {
     }
     if (ant.raidCargo > 0) this.depositLoot(ant, colony);
     if (ant.raidId) this.resolveRaidMemberOutcome(ant, colony, "RETURNED");
+  }
+
+  pickupInternalFood(ant, colony, colonyConfig) {
+    const amount = Math.min(colonyConfig.nestInternalFoodCarry, colony.foodStock);
+    if (amount <= 0) {
+      ant.nestTask = NestTask.NONE;
+      return;
+    }
+    colony.takeStock(amount);
+    ant.internalFoodCargo = amount;
+  }
+
+  deliverBroodFood(ant, colony) {
+    colony.broodFoodBuffer += ant.internalFoodCargo;
+    colony.broodFoodDelivered += ant.internalFoodCargo;
+    ant.internalFoodCargo = 0;
+    this.emitEvent("BROOD_FED", { antId: ant.id, colonyId: colony.id });
   }
 
   updateRaidTravel(ant, colony) {
@@ -1554,6 +1626,10 @@ export class Simulation {
       antsInsideNest: livingAnts.filter((ant) => ant.locationType === "NEST").length,
       antsInStorage: livingAnts.filter((ant) => ant.nestChamberId === NestChamberType.STORAGE).length,
       antsInBroodChamber: livingAnts.filter((ant) => ant.nestChamberId === NestChamberType.BROOD).length,
+      antsFeedingBrood: livingAnts.filter((ant) => ant.nestTask === NestTask.FEED_BROOD).length,
+      antsTendingBrood: livingAnts.filter((ant) => ant.nestTask === NestTask.TEND_BROOD).length,
+      broodFoodBuffer: colony.broodFoodBuffer,
+      broodFoodDelivered: colony.broodFoodDelivered,
       foodPheromones,
       homePheromones,
       alarmPheromones,

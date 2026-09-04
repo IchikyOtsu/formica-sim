@@ -75,5 +75,7 @@ export class Ant {
     this.nestChamberId = null;
     this.nestTask = "NONE";
     this.nestTransitionCooldown = 0;
+    this.internalFoodCargo = 0;
+    this.nestTendTicksRemaining = 0;
   }
 }

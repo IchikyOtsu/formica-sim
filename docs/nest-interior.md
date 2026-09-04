@@ -106,3 +106,119 @@ rendu, pas un état simulé.
 - Les raiders n'entrent jamais dans le nid ennemi (inchangé depuis V1.4.1) ;
   un raider revenant chez lui suit le même cycle qu'un forager normal.
 - `capacity` des chambres n'est pas encore appliquée (informative).
+
+## V1.5.2 — Tâches internes du nid
+
+Les fourmis à l'intérieur ne se contentent plus de stocker/se reposer : une
+vraie économie interne existe, avec un ordre de priorité fixe recalculé à
+chaque fois qu'une fourmi finit une étape (`nestTask === NONE`) :
+
+```text
+1. décharger nourriture portée (GO_TO_STORAGE)
+2. se soigner si énergie faible (GO_TO_REST)
+3. nourrir le couvain si des larves ont faim (FEED_BROOD)
+4. soigner le couvain sinon, tant que le nid en a (TEND_BROOD)
+5. sortir (EXIT_NEST)
+```
+
+### Qui décide quoi
+
+- **`NestTaskSystem.decide()`** (nouveau, `src/nest/NestTaskSystem.js`) —
+  fonction pure, ne modifie rien, prend en entrée l'état de la fourmi + une
+  photo du besoin du couvain. Testable isolément.
+- **`BroodDemandSystem.evaluate()`** (nouveau, `src/systems/BroodDemandSystem.js`)
+  — expose `hungryLarvae`/`foodDemand` à partir du flag `brood.starved`
+  (posé par `BroodSystem` à chaque tick où une larve n'a pas pu consommer
+  tout son besoin). Lu avec **un tick de retard** volontairement — ce n'est
+  pas un bug : `broodDemand` est calculé une fois par colonie avant la boucle
+  des fourmis, à partir de l'état laissé par le tick précédent.
+- `NestNavigationSystem` reste inchangé (le COMMENT déplacer) ; Simulation
+  reste responsable des effets d'arrivée (le QUOI faire une fois là), exactement
+  comme en V1.5.1 — pas de `NestInteractionSystem` séparé : les effets
+  d'arrivée (dépôt, repos, ramassage, livraison, sortie) restent des méthodes
+  de `Simulation`, qui gère déjà toute l'économie/les événements de colonie ;
+  un wrapper séparé n'aurait fait que déplacer le même code sans réduire le
+  couplage réel à `colony`/`emitEvent`.
+
+### Nourrir le couvain : une vraie ressource en transit
+
+`ant.internalFoodCargo` est un troisième pool de charge, distinct de
+`carryingFoodAmount` (butin de forage) et `raidCargo` (butin de pillage).
+Cycle `FEED_BROOD` :
+
+```text
+STORAGE : colony.takeStock(nestInternalFoodCarry) → ant.internalFoodCargo
+  (retire du stock SANS le compter "consommé" — c'est en transit, comme un
+  forager qui porte de la nourriture)
+BROOD   : ant.internalFoodCargo → colony.broodFoodBuffer (livré, pas encore mangé)
+```
+
+`BroodSystem` puise dans `colony.broodFoodBuffer` **en priorité**, avant de
+retomber sur `colony.consumeFood()` directement sur le stock général (le
+même mécanisme qu'avant V1.5.2, inchangé). Si aucune nourrice n'a jamais
+rien livré, `broodFoodBuffer` reste à 0 pour toujours et le comportement est
+strictement identique à avant ce ticket — encore une fois strictement additif.
+
+Sous un stock confortable (le cas par défaut), une larve n'est quasiment
+jamais `starved` : `consumeFood()` seul suffit à couvrir son besoin minuscule
+(`larvaFoodPerTick`) chaque tick, sans délai. `FEED_BROOD` ne s'active donc
+en pratique que sous vraie disette — un mécanisme de secours, pas un flux
+permanent. Vérifié : sur le scénario par défaut (20 000 ticks), `TEND_BROOD`
+s'active naturellement mais `FEED_BROOD` reste dormant ; forcé en scénario de
+disette contrôlée, le cycle complet (ramassage → livraison → `broodFoodBuffer`)
+a été vérifié pas à pas.
+
+### Soigner le couvain
+
+`TEND_BROOD` immobilise l'ouvrière dans `BROOD` pendant `nestTendBroodTicks`
+(défaut 40), plafonné par `nestCaregiverRatio` (une fraction du couvain, pas
+un nombre fixe). Pendant qu'elle y est, elle compte dans
+`activeTenders` et accélère très légèrement le développement du couvain :
+
+```text
+broodCareFactor = 1 + min(activeTenders, brood.length) × nestBroodCareBonus
+```
+
+multiplié directement dans le `developmentMultiplier` déjà utilisé par
+`BroodSystem.update` (le même paramètre que la saisonnalité) — à `0`
+soigneur, `broodCareFactor = 1`, comportement identique à avant.
+
+### Plafond anti-ruée
+
+`activeCaregivers` (fourmis déjà en `FEED_BROOD`/`TEND_BROOD`) est compté une
+fois par colonie avant la boucle des fourmis, puis tenu à jour en direct à
+chaque changement de tâche dans la même boucle — pas de re-scan `O(n²)`. Le
+plafond est `max(1, ⌈brood.length × nestCaregiverRatio⌉)` : jamais toute la
+colonie ne se rue sur le couvain, même avec beaucoup de larves affamées.
+
+### Soldats
+
+Un soldat entré dans le nid (uniquement via `RETURNING_HOME`, jamais
+`DEFENDING`, inchangé depuis V1.5.1) ne reçoit jamais `FEED_BROOD` ni
+`TEND_BROOD` — `NestTaskSystem` l'exclut explicitement par caste. Il ne fait
+que se reposer puis ressortir.
+
+### Conservation
+
+Deux nouveaux termes dans `Invariants.js`, tous deux nécessaires pour que la
+masse ne "disparaisse" jamais pendant le transit interne :
+`ant.internalFoodCargo` (porté par une nourrice en route) et
+`colony.broodFoodBuffer` (livré à BROOD mais pas encore consommé par les
+larves). Vérifié sur 20 000 ticks en continu, y compris pendant un cycle de
+ramassage/livraison forcé.
+
+### Non fait volontairement (V1.5.2)
+
+- Pas de `MOVE_FOOD` (transport ENTRANCE→STORAGE) : le dépôt a lieu
+  directement à STORAGE depuis V1.5.1, donc cette tâche n'a d'utilité
+  qu'avec plusieurs chambres de stockage (V1.5.3+).
+- Pas de panneau UI dédié "Tâches internes" avec répartition en temps réel —
+  seulement deux nouvelles lignes dans la carte de colonie
+  (`Nourrices / Soigneuses`, `Nourriture livrée au couvain`) ; un vrai
+  histogramme est reporté à une itération future si le besoin s'en fait sentir.
+- Pas de nouveaux marqueurs `TacticalOverlaySystem` (BROOD_FED etc.) —
+  ce système ne couvre que la vue MONDE, pas la vue intérieure du nid.
+- Nouveaux réglages (`nestCaregiverRatio`, `nestBroodFeedStockThreshold`,
+  `nestInternalFoodCarry`, `nestTendBroodTicks`, `nestBroodCareBonus`) non
+  exposés dans le panneau de paramètres web — seulement en configuration,
+  comme la majorité des réglages fins de raid/combat déjà non exposés.
