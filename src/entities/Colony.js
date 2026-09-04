@@ -22,6 +22,8 @@ export class Colony {
     this.attacks = 0;
     this.kills = 0;
     this.combatLosses = 0;
+    this.threats = 0;
+    this.damageDealt = 0;
     this.maxPopulation = 1;
   }
 

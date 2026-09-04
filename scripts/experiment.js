@@ -6,6 +6,7 @@ const scripts = {
   survival: "./ecology-benchmark.js",
   pheromones: "./benchmark.js",
   competition: "./competition-benchmark.js",
+  combat: "./combat-benchmark.js",
 };
 
 if (!scripts[experiment]) {

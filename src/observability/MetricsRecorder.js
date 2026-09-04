@@ -74,6 +74,8 @@ export class MetricsRecorder {
         attacks: colony.attacks,
         kills: colony.kills,
         combatLosses: colony.combatLosses,
+        threats: colony.threats,
+        damageDealt: colony.damageDealt,
       })),
     });
   }

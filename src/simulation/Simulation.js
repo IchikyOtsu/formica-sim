@@ -717,6 +717,7 @@ export class Simulation {
     field.deposit(PheromoneType.TERRITORY, ant.position, colonyConfig.combatThreatenTerritoryStrength);
     field.deposit(PheromoneType.ALARM, ant.position, colonyConfig.combatThreatenAlarmStrength);
     this.threats += 1;
+    colony.threats += 1;
     this.emitEvent("FOREIGN_THREAT", {
       colonyId: colony.id,
       antId: ant.id,
@@ -755,6 +756,7 @@ export class Simulation {
     this.attacks += 1;
     colony.attacks += 1;
     this.damageDealt += damage;
+    colony.damageDealt += damage;
     this.emitEvent("ANT_ATTACKED", {
       colonyId: colony.id,
       antId: attacker.id,
@@ -998,6 +1000,8 @@ export class Simulation {
       attacks: colony.attacks,
       kills: colony.kills,
       combatLosses: colony.combatLosses,
+      threats: colony.threats,
+      damageDealt: colony.damageDealt,
       territoryCells: this.territoryMap.getStats().controlled[colony.id] ?? 0,
       foodPheromones,
       homePheromones,

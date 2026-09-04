@@ -14,6 +14,7 @@
     "experiment": "node scripts/experiment.js",
     "validate": "node scripts/validate-v1.js",
     "validate:reference": "node scripts/reference-scenario.js",
-    "benchmark:competition": "node scripts/competition-benchmark.js"
+    "benchmark:competition": "node scripts/competition-benchmark.js",
+    "benchmark:combat": "node scripts/combat-benchmark.js"
   }
 }
