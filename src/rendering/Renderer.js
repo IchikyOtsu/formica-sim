@@ -14,7 +14,7 @@ export class Renderer {
   }
 
   setPheromoneMode(mode) {
-    if (!["BOTH", "FOOD", "HOME", "OFF"].includes(mode)) {
+    if (!["BOTH", "FOOD", "HOME", "ALARM", "OFF"].includes(mode)) {
       throw new Error(`Unknown pheromone display mode: ${mode}`);
     }
     this.pheromoneMode = mode;
@@ -75,6 +75,9 @@ export class Renderer {
     }
     if (this.pheromoneMode === "BOTH" || this.pheromoneMode === "FOOD") {
       this.drawPheromoneLayer(ctx, field, PheromoneType.FOOD, [137, 201, 102]);
+    }
+    if (this.pheromoneMode === "BOTH" || this.pheromoneMode === "ALARM") {
+      this.drawPheromoneLayer(ctx, field, PheromoneType.ALARM, [234, 76, 132]);
     }
     ctx.restore();
   }

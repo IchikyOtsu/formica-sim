@@ -54,6 +54,7 @@ function run(experiment, seed) {
   const simulation = new Simulation({
     ...DEFAULT_CONFIG,
     seasonDurationTicks,
+    alarmPheromonesEnabled: false,
     ...experiment.config,
     seed,
   });

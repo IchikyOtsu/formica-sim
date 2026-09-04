@@ -20,6 +20,7 @@ import { HomeDetectionSystem } from "../src/systems/HomeDetectionSystem.js";
 import { PheromoneDepositSystem } from "../src/systems/PheromoneDepositSystem.js";
 import { PheromoneSensingSystem } from "../src/systems/PheromoneSensingSystem.js";
 import { MetabolismSystem } from "../src/systems/MetabolismSystem.js";
+import { DirectionScoringSystem } from "../src/systems/DirectionScoringSystem.js";
 
 function foragingConfig(overrides = {}) {
   return {
@@ -297,6 +298,12 @@ test("identical seeds reproduce ants, resources, and pheromone fields", () => {
     first.pheromoneField.layer(PheromoneType.HOME),
     second.pheromoneField.layer(PheromoneType.HOME),
   );
+  assert.deepEqual(
+    first.pheromoneField.layer(PheromoneType.ALARM),
+    second.pheromoneField.layer(PheromoneType.ALARM),
+  );
+  assert.equal(first.getMetrics().dangerExposures, second.getMetrics().dangerExposures);
+  assert.equal(first.getMetrics().environmentalDeaths, second.getMetrics().environmentalDeaths);
 });
 
 test("enabling empty pheromone layers does not change the baseline random walk", () => {
@@ -881,4 +888,135 @@ test("stored food improves survival through repeated seasonal pressure", () => {
   };
   assert.equal(run(0), 0);
   assert.ok(run(10) > 0);
+});
+
+test("ALARM is an independent pheromone layer with faster configurable decay", () => {
+  const field = new PheromoneField(60, 60, 10, 100);
+  const position = { x: 25, y: 25 };
+  field.deposit(PheromoneType.FOOD, position, 10);
+  field.deposit(PheromoneType.ALARM, position, 10);
+  field.update({
+    evaporationRate: 0.01,
+    diffusionRate: 0,
+    minimumIntensity: 0,
+    types: [PheromoneType.FOOD],
+  });
+  field.update({
+    evaporationRate: 0.2,
+    diffusionRate: 0,
+    minimumIntensity: 0,
+    types: [PheromoneType.ALARM],
+  });
+  assert.ok(Math.abs(field.sample(PheromoneType.FOOD, position) - 9.9) < 1e-6);
+  assert.equal(field.sample(PheromoneType.ALARM, position), 8);
+  assert.equal(field.sample(PheromoneType.HOME, position), 0);
+});
+
+test("direction scoring avoids ALARM while retaining directional alternatives", () => {
+  const field = new PheromoneField(100, 100, 5, 100);
+  const ant = new Ant({
+    id: "SCOUT",
+    position: { x: 50, y: 50 },
+    direction: 0,
+    speed: 1,
+    colonyId: "C-01",
+  });
+  field.deposit(PheromoneType.ALARM, { x: 70, y: 50 }, 80);
+  const scoring = new DirectionScoringSystem(() => 0.5);
+  const suggestion = scoring.suggestDirection(ant, field, {
+    distance: 20,
+    arc: Math.PI,
+    samples: 3,
+    minimumSignal: 0.001,
+    minimumAlarmSignal: 0.001,
+    revisitPenalty: 1,
+    foodWeight: 1,
+    homeWeight: 0,
+    alarmWeight: 2,
+    inertiaWeight: 0.1,
+    noiseWeight: 0.02,
+    baseInfluence: 0.6,
+  });
+  assert.ok(Math.abs(suggestion.direction) > 1);
+  assert.ok(suggestion.alarm > 1);
+  assert.equal(Object.hasOwn(scoring, "dangerZones"), false);
+});
+
+test("hazard damage and environmental death create different ALARM deposits", () => {
+  const damage = new Simulation({
+    ...foragingConfig(),
+    environmentEnabled: true,
+    reproductionEnabled: false,
+    foodSpawnProbability: 0,
+    dangerZones: [{
+      id: "SAFE-DAMAGE",
+      x: 15,
+      y: 40,
+      radius: 30,
+      energyMultiplier: 3,
+      mortalityProbability: 0,
+    }],
+    energyConsumptionRate: 0.1,
+    alarmDamageThreshold: 0,
+  });
+  damage.tick();
+  assert.ok(damage.getMetrics().damageAlarmDeposits > 0);
+  const damageAlarm = damage.getMetrics().alarmPheromones.total;
+
+  const lethal = new Simulation({
+    ...foragingConfig(),
+    environmentEnabled: true,
+    reproductionEnabled: false,
+    foodSpawnProbability: 0,
+    dangerZones: [{
+      id: "LETHAL",
+      x: 15,
+      y: 40,
+      radius: 30,
+      energyMultiplier: 1,
+      mortalityProbability: 2,
+    }],
+  });
+  lethal.tick();
+  assert.equal(lethal.getMetrics().environmentalDeaths, 1);
+  assert.equal(lethal.getMetrics().deathAlarmDeposits, 1);
+  assert.ok(lethal.getMetrics().alarmPheromones.total > damageAlarm);
+
+  const disabled = new Simulation({
+    ...lethal.config,
+    alarmPheromonesEnabled: false,
+  });
+  disabled.tick();
+  assert.equal(disabled.getMetrics().environmentalDeaths, 1);
+  assert.equal(disabled.getMetrics().alarmPheromones.total, 0);
+});
+
+test("safe passage creates no ALARM and reset clears learned danger", () => {
+  const simulation = new Simulation({
+    ...foragingConfig(),
+    environmentEnabled: true,
+    reproductionEnabled: false,
+    foodSpawnProbability: 0,
+    dangerZones: [],
+  });
+  for (let index = 0; index < 20; index += 1) simulation.tick();
+  assert.deepEqual(simulation.getMetrics().alarmPheromones, {
+    total: 0,
+    activeCells: 0,
+    maximum: 0,
+  });
+  simulation.pheromoneField.deposit(PheromoneType.ALARM, { x: 20, y: 20 }, 10);
+  simulation.reset();
+  assert.equal(simulation.getMetrics().alarmPheromones.total, 0);
+});
+
+test("ant behaviors receive signals but never danger-zone geometry", () => {
+  const simulation = new Simulation();
+  assert.equal(Object.hasOwn(simulation.searchFood, "dangerZones"), false);
+  assert.equal(Object.hasOwn(simulation.returnHome, "dangerZones"), false);
+  assert.equal(Object.hasOwn(simulation.directionScoring, "dangerZones"), false);
+  assert.ok(simulation.hazard.exposure(
+    simulation.dangerZones[0].position,
+    simulation.dangerZones,
+  ).exposed);
 });

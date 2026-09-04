@@ -46,6 +46,11 @@ const elements = {
   pheromoneTotal: document.querySelector("#pheromone-total"),
   pheromoneCells: document.querySelector("#pheromone-cells"),
   pheromoneMaximum: document.querySelector("#pheromone-max"),
+  alarmTotal: document.querySelector("#alarm-total"),
+  alarmCells: document.querySelector("#alarm-cells"),
+  dangerExposures: document.querySelector("#danger-exposures"),
+  dangerDistance: document.querySelector("#danger-distance"),
+  averageDetour: document.querySelector("#average-detour"),
   completionTick: document.querySelector("#completion-tick"),
   time: document.querySelector("#sim-time"),
 };
@@ -100,6 +105,11 @@ function updateMetrics() {
   elements.pheromoneTotal.textContent = metrics.pheromoneTotal.toFixed(0);
   elements.pheromoneCells.textContent = metrics.pheromoneCells;
   elements.pheromoneMaximum.textContent = metrics.pheromoneMaximum.toFixed(1);
+  elements.alarmTotal.textContent = metrics.alarmPheromones.total.toFixed(0);
+  elements.alarmCells.textContent = metrics.alarmPheromones.activeCells;
+  elements.dangerExposures.textContent = metrics.dangerExposures;
+  elements.dangerDistance.textContent = metrics.dangerDistance.toFixed(0);
+  elements.averageDetour.textContent = metrics.averageDetourDistance.toFixed(1);
   elements.completionTick.textContent = metrics.completionTick === null
     ? "—"
     : `${metrics.completionTick} ticks`;
@@ -167,6 +177,9 @@ document.querySelector("#parameters-form").addEventListener("submit", (event) =>
     foodSpawnProbability: Number(document.querySelector("#param-spawn-probability").value),
     maxActiveSources: Number(document.querySelector("#param-max-sources").value),
     foodRespawnDelayTicks: Number(document.querySelector("#param-respawn-delay").value),
+    alarmPheromonesEnabled: document.querySelector("#param-alarm").checked,
+    alarmInfluence: Number(document.querySelector("#param-alarm-influence").value),
+    alarmEvaporationRate: Number(document.querySelector("#param-alarm-evaporation").value),
   });
   accumulator = 0;
   updateMetrics();

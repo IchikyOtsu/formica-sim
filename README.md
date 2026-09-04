@@ -1,9 +1,9 @@
 # Formica Sim
 
 Un petit laboratoire visuel pour observer une colonie de fourmis dans un monde
-2D. La V0.7 place sa démographie dans un monde dynamique : les sources suivent
-un cycle de vie, les saisons modulent ressources et coûts, et des zones
-dangereuses exercent une pression énergétique ou mortelle sur les ouvrières.
+2D. La V0.8 ajoute une adaptation collective au danger : l'expérience locale
+produit une phéromone `ALARM`, puis les autres fourmis apprennent indirectement
+à éviter les passages risqués sans connaître leur géométrie.
 
 ## Lancer le projet
 
@@ -21,7 +21,7 @@ Puis ouvrir <http://localhost:4173>.
 npm test
 ```
 
-Comparer environnement stable, saisons modérées et saisons hostiles :
+Comparer danger sans alarme, puis alarme faible, équilibrée et forte :
 
 ```bash
 npm run benchmark
@@ -30,7 +30,7 @@ npm run benchmark
 Le nombre de seeds et la durée sont configurables :
 
 ```bash
-npm run benchmark -- --seeds=10 --ticks=40000 --season=2500
+npm run benchmark -- --seeds=10 --ticks=30000
 ```
 
 Le benchmark historique des réseaux de phéromones reste disponible :
@@ -41,6 +41,9 @@ npm run benchmark:pheromones
 
 Le benchmark démographique V0.6 reste disponible avec
 `npm run benchmark:demography`.
+
+Le benchmark environnemental V0.7 reste disponible avec
+`npm run benchmark:environment`.
 
 Le benchmark V0.5 de survie est également conservé :
 
@@ -62,6 +65,7 @@ src/
 ├── systems/MetabolismSystem.js
 ├── systems/{BroodSystem,FoodRegenerationSystem}.js
 ├── systems/{EnvironmentSystem,FoodSpawnSystem,HazardSystem}.js
+├── systems/{AlarmDepositSystem,DirectionScoringSystem}.js
 ├── main.js
 └── styles.css
 ```
@@ -81,7 +85,7 @@ unité sont désactivées et ne sont plus rendues.
 
 ## Écologie des phéromones V0.4
 
-`PheromoneField` gère deux couches scalaires indépendantes sur une grille de 10
+Depuis V0.4, `PheromoneField` gère des couches scalaires indépendantes sur une grille de 10
 unités. Les fourmis en recherche déposent `HOME` avec une force décroissante
 depuis leur dernier passage au nid. Les fourmis chargées remontent ce gradient et
 déposent `FOOD`. L'évaporation et une diffusion légère sont appliquées à chaque
@@ -93,7 +97,7 @@ retours immédiats. `ReturnHomeBehavior` ne reçoit ni le nid ni sa position : s
 `HomeDetectionSystem` fournit une direction lorsque l'individu entre dans le
 petit rayon de détection local du nid.
 
-Le sélecteur **Pistes** affiche `FOOD`, `HOME`, les deux couches ou aucune. Masquer
+Le sélecteur **Pistes** affiche `FOOD`, `HOME`, `ALARM`, toutes les couches ou aucune. Masquer
 les couches n'arrête jamais leur calcul. Le panneau de paramètres applique avec
 reset la population, l'évaporation, la diffusion, les forces de dépôt,
 l'influence des pistes et l'exploration.
@@ -175,6 +179,26 @@ les morts par famine ou environnement et l'autonomie estimée. Cette dernière
 vaut `stock / consommation moyenne récente` et reste indéfinie tant qu'aucune
 nourriture n'a été consommée.
 
+## Danger, alarme et adaptation collective V0.8
+
+`ALARM` est une troisième couche du même `PheromoneField`. Un surcoût local
+important déclenche un petit dépôt ; une mort environnementale produit un signal
+fort sur la cellule et ses voisines. Son évaporation est six fois plus rapide
+que celle des pistes ordinaires et sa diffusion reste faible, afin qu'un ancien
+danger ne condamne pas durablement un passage.
+
+`HazardSystem` est le seul composant qui reçoit les `DangerZone`.
+`DirectionScoringSystem` échantillonne plusieurs directions et combine
+attraction `FOOD` ou `HOME`, répulsion `ALARM`, inertie et bruit. Les comportements
+ne reçoivent qu'une direction proposée et conservent une composante exploratoire ;
+ils n'ont ni carte de danger ni pathfinding global.
+
+Les événements létaux utilisent un tirage déterministe indexé par seed, tick,
+fourmi et zone. Un benchmark avec et sans `ALARM` compare ainsi les mêmes
+opportunités de mortalité, même lorsque les trajectoires divergent. Les métriques
+ajoutent expositions, distance dans les zones dangereuses, intensité et cellules
+`ALARM`, dépôts sur dommage ou décès et détour moyen des retours chargés.
+
 ## Benchmark des phéromones V0.4
 
 Le benchmark compare :
@@ -242,9 +266,26 @@ ouvrières mortes. Il n'existe encore ni caste, ni soldat, ni génétique.
 
 ## Benchmark environnemental V0.7
 
-`npm run benchmark` exécute un contrôle stable, des saisons modérées et un monde
+`npm run benchmark:environment` exécute un contrôle stable, des saisons modérées et un monde
 hostile sur plusieurs cycles. Il rapporte population moyenne, minimale et
 finale, stocks minimal et maximal, naissances, mortalité ventilée, extinction et
 cycles saisonniers traversés. Les options `--seeds`, `--ticks` et `--season`
 contrôlent respectivement le nombre de graines, la durée totale et la durée de
 chaque saison.
+
+## Benchmark ALARM V0.8
+
+`npm run benchmark` compare `ALARM` désactivée, faible, équilibrée et forte dans
+le même environnement dangereux. Il mesure survie, mortalité environnementale,
+expositions, distance en danger, collecte, distance totale, détour et état du
+champ d'alarme. Le scénario amplifie volontairement la létalité pour rendre
+l'effet mesurable sur des runs courts ; `--seeds` et `--ticks` règlent
+l'expérience.
+
+Sur la seed de référence à 10 000 ticks, l'alarme équilibrée réduit les
+expositions de 13 865 à 5 347 et la distance dangereuse de 19 134 à 7 271 unités,
+tout en augmentant la collecte de 399 à 539 unités. La mortalité
+environnementale passe de 4 à 3 ouvrières.
+Le profil fort et persistant descend à 2 morts, mais sa collecte chute à 380 et
+son détour moyen remonte à 364 unités : la barrière informationnelle devient
+plus coûteuse que le risque qu'elle évite.

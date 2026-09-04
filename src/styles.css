@@ -87,6 +87,7 @@ h1 span { color: var(--accent); font-weight: 500; }
 .danger-dot { background: #c95f49; box-shadow: 0 0 5px rgba(201, 95, 73, .65); }
 .food-pheromone-dot { background: rgba(137, 201, 102, .75); box-shadow: 0 0 5px #89c966; }
 .home-pheromone-dot { background: rgba(92, 151, 211, .8); box-shadow: 0 0 5px #5c97d3; }
+.alarm-pheromone-dot { background: #ea4c84; box-shadow: 0 0 6px rgba(234, 76, 132, .8); }
 .observation p:last-child { margin: 0; color: #99a08f; font-size: 11px; line-height: 1.7; }
 .simulation-panel { min-width: 0; }
 .canvas-toolbar { height: 75px; padding: 18px 22px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--line); }

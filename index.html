@@ -19,7 +19,7 @@
           </span>
           <div>
             <p class="eyebrow">Laboratoire de terrain</p>
-            <h1>FORMICA <span>/ SIM V0.7</span></h1>
+            <h1>FORMICA <span>/ SIM V0.8</span></h1>
           </div>
         </div>
         <div class="status-pill"><span></span> Système opérationnel</div>
@@ -112,6 +112,13 @@
               <p><strong id="pheromone-max">0</strong><span>Maximum</span></p>
             </div>
             <p class="completion"><span>Collecte complète</span><strong id="completion-tick">—</strong></p>
+            <div class="economy-stats">
+              <p><span>ALARM totale</span><strong id="alarm-total">0</strong></p>
+              <p><span>Cellules ALARM</span><strong id="alarm-cells">0</strong></p>
+              <p><span>Expositions</span><strong id="danger-exposures">0</strong></p>
+              <p><span>Distance danger</span><strong id="danger-distance">0</strong></p>
+              <p><span>Détour moyen</span><strong id="average-detour">0</strong></p>
+            </div>
           </div>
 
           <div class="legend">
@@ -127,11 +134,12 @@
             <div><span class="legend-dot danger-dot"></span> Zone dangereuse <em>Risque + coût</em></div>
             <div><span class="legend-dot food-pheromone-dot"></span> FOOD <em>Vers nourriture</em></div>
             <div><span class="legend-dot home-pheromone-dot"></span> HOME <em>Vers le nid</em></div>
+            <div><span class="legend-dot alarm-pheromone-dot"></span> ALARM <em>Évitement appris</em></div>
           </div>
 
           <div class="observation">
             <p class="section-label">Observation</p>
-            <p>Le monde alterne abondance et pression. Les réserves accumulées déterminent la capacité de la colonie à traverser l’hiver.</p>
+            <p>Une expérience locale du danger devient un signal collectif : les autres fourmis contournent ALARM sans connaître les zones.</p>
           </div>
         </aside>
 
@@ -155,6 +163,7 @@
                 <option value="BOTH">Toutes</option>
                 <option value="FOOD">FOOD</option>
                 <option value="HOME">HOME</option>
+                <option value="ALARM">ALARM</option>
                 <option value="OFF">Masquées</option>
               </select>
             </label>
@@ -193,6 +202,9 @@
               <label>Proba. apparition<input id="param-spawn-probability" type="number" min="0" max="0.1" step="0.001" value="0.003" /></label>
               <label>Sources max.<input id="param-max-sources" type="number" min="1" max="20" step="1" value="5" /></label>
               <label>Délai réapparition<input id="param-respawn-delay" type="number" min="0" max="100000" step="100" value="1200" /></label>
+              <label class="check-label">ALARM<input id="param-alarm" type="checkbox" checked /></label>
+              <label>Influence ALARM<input id="param-alarm-influence" type="number" min="0" max="5" step="0.1" value="1.2" /></label>
+              <label>Évaporation ALARM<input id="param-alarm-evaporation" type="number" min="0" max="0.2" step="0.001" value="0.018" /></label>
               <button type="submit">Appliquer + Reset</button>
             </form>
           </details>

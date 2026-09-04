@@ -9,7 +9,9 @@ import { Nest } from "../entities/Nest.js";
 import { Queen } from "../entities/Queen.js";
 import { DangerZone } from "../environment/DangerZone.js";
 import { SEASON_LABELS } from "../environment/Season.js";
+import { AlarmDepositSystem } from "../systems/AlarmDepositSystem.js";
 import { BroodSystem } from "../systems/BroodSystem.js";
+import { DirectionScoringSystem } from "../systems/DirectionScoringSystem.js";
 import { EnvironmentSystem } from "../systems/EnvironmentSystem.js";
 import { MovementSystem } from "../systems/MovementSystem.js";
 import { MetabolismSystem } from "../systems/MetabolismSystem.js";
@@ -33,6 +35,19 @@ function seededRandom(seed) {
   };
 }
 
+function deterministicEventRoll(seed, tick, antId, zoneId) {
+  const text = `${seed}:${tick}:${antId}:${zoneId}`;
+  let hash = 2166136261;
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  hash ^= hash >>> 16;
+  hash = Math.imul(hash, 2246822507);
+  hash ^= hash >>> 13;
+  return (hash >>> 0) / 4294967296;
+}
+
 export class Simulation {
   constructor(config = DEFAULT_CONFIG) {
     this.config = config;
@@ -40,6 +55,7 @@ export class Simulation {
     this.foodDetection = new FoodDetectionSystem();
     this.foodCollection = new FoodCollectionSystem();
     this.pheromoneDeposit = new PheromoneDepositSystem();
+    this.alarmDeposit = new AlarmDepositSystem();
     this.homeDetection = new HomeDetectionSystem();
     this.metabolism = new MetabolismSystem();
     this.foodRegeneration = new FoodRegenerationSystem();
@@ -61,11 +77,11 @@ export class Simulation {
     this.sensingRandom = seededRandom(this.config.seed ^ 0x9e3779b9);
     this.birthRandom = seededRandom(this.config.seed ^ 0x85ebca6b);
     this.environmentRandom = seededRandom(this.config.seed ^ 0xc2b2ae35);
-    this.hazardRandom = seededRandom(this.config.seed ^ 0x27d4eb2f);
     this.randomWalk = new RandomWalk(this.random, this.config.explorationStrength);
     this.searchFood = new SearchFoodBehavior(this.randomWalk, this.config.pheromoneInfluence);
     this.returnHome = new ReturnHomeBehavior(this.randomWalk, this.config.homeTrailInfluence);
     this.pheromoneSensing = new PheromoneSensingSystem(this.sensingRandom);
+    this.directionScoring = new DirectionScoringSystem(this.sensingRandom);
     this.foodSpawn = new FoodSpawnSystem(this.environmentRandom);
     this.world = new World(this.config.width, this.config.height);
     this.pheromoneField = new PheromoneField(
@@ -104,6 +120,11 @@ export class Simulation {
     this.totalPickups = 0;
     this.totalReturnTicks = 0;
     this.completedReturns = 0;
+    this.totalDetourDistance = 0;
+    this.dangerExposures = 0;
+    this.dangerDistance = 0;
+    this.damageAlarmDeposits = 0;
+    this.deathAlarmDeposits = 0;
     this.exploredCells = new Set();
     this.lostFood = 0;
     this.regeneratedFood = 0;
@@ -166,6 +187,14 @@ export class Simulation {
           this.config.homePheromonesEnabled && PheromoneType.HOME,
         ].filter(Boolean),
       });
+      if (this.config.alarmPheromonesEnabled) {
+        this.pheromoneField.update({
+          evaporationRate: this.config.alarmEvaporationRate,
+          diffusionRate: this.config.alarmDiffusionRate,
+          minimumIntensity: this.config.alarmMinimumIntensity,
+          types: [PheromoneType.ALARM],
+        });
+      }
     }
     for (const ant of this.colony.ants) {
       if (ant.state === AntState.DEAD) continue;
@@ -209,9 +238,7 @@ export class Simulation {
 
       let targetDistance;
       if (ant.state === AntState.RETURNING_HOME) {
-        const homeTrail = this.config.pheromonesEnabled && this.config.homePheromonesEnabled
-          ? this.senseTrail(ant, PheromoneType.HOME)
-          : null;
+        const navigation = this.scoreDirection(ant, "RETURNING_HOME");
         const detectionRadius = this.config.directHomeNavigation
           ? Infinity
           : this.config.homeDetectionRadius;
@@ -220,44 +247,63 @@ export class Simulation {
           this.colony.nest,
           detectionRadius,
         );
-        targetDistance = this.returnHome.update(ant, homeTrail, localHome, deltaSeconds);
+        targetDistance = this.returnHome.update(ant, navigation, localHome, deltaSeconds);
       } else {
         const food = this.foodDetection.findNearest(
           ant,
           this.foodSources,
           this.config.foodDetectionRadius,
         );
-        const suggestedTrail = this.config.pheromonesEnabled
-          && this.config.foodPheromonesEnabled
-          && !food
-          ? this.senseTrail(ant, PheromoneType.FOOD)
-          : null;
-        targetDistance = this.searchFood.update(ant, food, suggestedTrail, deltaSeconds);
+        const navigation = this.scoreDirection(ant, "SEARCHING_FOOD");
+        targetDistance = this.searchFood.update(ant, food, navigation, deltaSeconds);
       }
 
       const distance = this.movement.update(ant, this.world, deltaSeconds, targetDistance);
       this.totalDistance += distance;
-      const hazardMovementMultiplier = this.hazard.movementMultiplier(
-        ant.position,
-        this.dangerZones,
-      );
+      if (ant.state === AntState.RETURNING_HOME && ant.returnStartedTick !== null) {
+        ant.returnDistance += distance;
+      }
+      const exposure = this.hazard.exposure(ant.position, this.dangerZones);
+      if (exposure.exposed) {
+        this.dangerExposures += 1;
+        this.dangerDistance += distance;
+      }
+      const carryingMultiplier = ant.carryingFood ? this.config.carryingEnergyMultiplier : 1;
+      const baseMovementCost = distance * ant.energyConsumptionRate * carryingMultiplier
+        * this.currentEnvironment.movementCostMultiplier;
+      const hazardDamage = baseMovementCost * (exposure.movementMultiplier - 1);
+      if (this.config.pheromonesEnabled
+        && this.config.alarmPheromonesEnabled
+        && hazardDamage >= this.config.alarmDamageThreshold) {
+        this.alarmDeposit.depositDamage(
+          ant.position,
+          this.pheromoneField,
+          this.config.alarmDamageDepositStrength,
+        );
+        this.damageAlarmDeposits += 1;
+      }
       if (this.metabolism.consumeEnergy(
         ant,
         distance,
         deltaSeconds,
         this.config.carryingEnergyMultiplier,
         this.config.basalEnergyConsumptionRate,
-        this.currentEnvironment.movementCostMultiplier * hazardMovementMultiplier,
+        this.currentEnvironment.movementCostMultiplier * exposure.movementMultiplier,
         this.currentEnvironment.metabolismMultiplier,
       )) {
-        this.handleDeath(ant, "STARVATION");
+        this.handleDeath(ant, exposure.exposed ? "ENVIRONMENT" : "STARVATION");
         continue;
       }
       if (this.hazard.applyMortality(
         ant,
         this.dangerZones,
         this.currentEnvironment.hazardMultiplier,
-        this.hazardRandom,
+        (zone) => deterministicEventRoll(
+          this.config.seed,
+          this.tickCount,
+          ant.id,
+          zone.id,
+        ),
       )) {
         this.handleDeath(ant, "ENVIRONMENT");
         continue;
@@ -271,7 +317,10 @@ export class Simulation {
         if (this.foodCollection.deposit(ant, this.colony)) {
           this.completedReturns += 1;
           this.totalReturnTicks += this.tickCount - ant.returnStartedTick;
+          this.totalDetourDistance += Math.max(0, ant.returnDistance - ant.directReturnDistance);
           ant.returnStartedTick = null;
+          ant.returnDistance = 0;
+          ant.directReturnDistance = 0;
         }
         if (this.homeDetection.isInside(ant, this.colony.nest)
           && this.metabolism.needsFood(ant)) {
@@ -287,6 +336,14 @@ export class Simulation {
         if (this.config.pheromonesEnabled) this.depositTrail(ant);
         if (this.foodCollection.collect(ant, this.config.foodPickupDistance)) {
           ant.returnStartedTick = this.tickCount;
+          ant.returnDistance = 0;
+          ant.directReturnDistance = Math.max(
+            0,
+            Math.hypot(
+              ant.position.x - this.colony.nest.position.x,
+              ant.position.y - this.colony.nest.position.y,
+            ) - this.colony.nest.radius,
+          );
           this.totalPickups += 1;
           if (this.config.pheromonesEnabled) this.depositTrail(ant);
         }
@@ -318,14 +375,27 @@ export class Simulation {
   }
 
   handleDeath(ant, cause = "STARVATION") {
-    if (cause === "ENVIRONMENT") this.environmentalDeaths += 1;
-    else this.starvationDeaths += 1;
+    if (cause === "ENVIRONMENT") {
+      this.environmentalDeaths += 1;
+      if (this.config.pheromonesEnabled && this.config.alarmPheromonesEnabled) {
+        this.alarmDeposit.depositDeath(
+          ant.position,
+          this.pheromoneField,
+          this.config.alarmDeathDepositStrength,
+        );
+        this.deathAlarmDeposits += 1;
+      }
+    } else {
+      this.starvationDeaths += 1;
+    }
     if (ant.carryingFood) {
       this.lostFood += ant.carryingFoodAmount;
       ant.carryingFood = false;
       ant.carryingFoodAmount = 0;
     }
     ant.returnStartedTick = null;
+    ant.returnDistance = 0;
+    ant.directReturnDistance = 0;
   }
 
   spawnWorker() {
@@ -362,6 +432,29 @@ export class Simulation {
     });
   }
 
+  scoreDirection(ant, state) {
+    if (!this.config.pheromonesEnabled) return null;
+    const returning = state === AntState.RETURNING_HOME;
+    return this.directionScoring.suggestDirection(ant, this.pheromoneField, {
+      distance: this.config.pheromoneSenseDistance,
+      arc: this.config.pheromoneSenseArc,
+      samples: this.config.pheromoneSenseSamples,
+      minimumSignal: this.config.pheromoneMinSignal / this.pheromoneField.maxIntensity,
+      minimumAlarmSignal: this.config.alarmMinimumIntensity / this.pheromoneField.maxIntensity,
+      revisitPenalty: this.config.pheromoneRevisitPenalty,
+      foodWeight: !returning && this.config.foodPheromonesEnabled
+        ? this.config.pheromoneInfluence
+        : 0,
+      homeWeight: returning && this.config.homePheromonesEnabled
+        ? this.config.homeTrailInfluence
+        : 0,
+      alarmWeight: this.config.alarmPheromonesEnabled ? this.config.alarmInfluence : 0,
+      inertiaWeight: this.config.navigationInertia,
+      noiseWeight: this.config.navigationNoise,
+      baseInfluence: returning ? this.config.homeTrailInfluence : this.config.pheromoneInfluence,
+    });
+  }
+
   depositTrail(ant) {
     return this.pheromoneDeposit.deposit(ant, this.pheromoneField, {
       foodEnabled: this.config.foodPheromonesEnabled,
@@ -384,6 +477,7 @@ export class Simulation {
   getMetrics() {
     const foodPheromones = this.pheromoneField.getStats(PheromoneType.FOOD);
     const homePheromones = this.pheromoneField.getStats(PheromoneType.HOME);
+    const alarmPheromones = this.pheromoneField.getStats(PheromoneType.ALARM);
     const livingAnts = this.colony.ants.filter((ant) => ant.state !== AntState.DEAD);
     const energies = livingAnts.map((ant) => ant.energy);
     const broodCounts = {
@@ -428,6 +522,10 @@ export class Simulation {
       deaths: this.colony.ants.length - livingAnts.length,
       starvationDeaths: this.starvationDeaths,
       environmentalDeaths: this.environmentalDeaths,
+      dangerExposures: this.dangerExposures,
+      dangerDistance: this.dangerDistance,
+      damageAlarmDeposits: this.damageAlarmDeposits,
+      deathAlarmDeposits: this.deathAlarmDeposits,
       netGrowth: this.births - (this.colony.ants.length - livingAnts.length),
       birthRate: this.tickCount === 0 ? 0 : this.births / this.tickCount * 1000,
       deathRate: this.tickCount === 0
@@ -460,17 +558,27 @@ export class Simulation {
         0,
       ),
       carryingAnts: this.colony.ants.filter((ant) => ant.carryingFood).length,
-      pheromoneTotal: foodPheromones.total + homePheromones.total,
-      pheromoneCells: foodPheromones.activeCells + homePheromones.activeCells,
-      pheromoneMaximum: Math.max(foodPheromones.maximum, homePheromones.maximum),
+      pheromoneTotal: foodPheromones.total + homePheromones.total + alarmPheromones.total,
+      pheromoneCells: foodPheromones.activeCells
+        + homePheromones.activeCells
+        + alarmPheromones.activeCells,
+      pheromoneMaximum: Math.max(
+        foodPheromones.maximum,
+        homePheromones.maximum,
+        alarmPheromones.maximum,
+      ),
       foodPheromones,
       homePheromones,
+      alarmPheromones,
       completionTick: this.completionTick,
       totalDistance: this.totalDistance,
       totalPickups: this.totalPickups,
       averageReturnTicks: this.completedReturns === 0
         ? 0
         : this.totalReturnTicks / this.completedReturns,
+      averageDetourDistance: this.completedReturns === 0
+        ? 0
+        : this.totalDetourDistance / this.completedReturns,
       exploredCells: this.exploredCells.size,
       elapsedMs: this.elapsedMs,
     };

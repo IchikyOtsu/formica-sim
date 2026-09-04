@@ -42,5 +42,7 @@ export class Ant {
     this.recentCells = [];
     this.returnStartedTick = null;
     this.returnReason = null;
+    this.returnDistance = 0;
+    this.directReturnDistance = 0;
   }
 }

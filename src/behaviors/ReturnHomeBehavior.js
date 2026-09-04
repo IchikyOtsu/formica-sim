@@ -10,14 +10,18 @@ export class ReturnHomeBehavior {
     this.trailInfluence = trailInfluence;
   }
 
-  update(ant, homeTrail, locallyDetectedHome, deltaSeconds) {
+  update(ant, navigationSuggestion, locallyDetectedHome, deltaSeconds) {
     this.randomWalk.update(ant, deltaSeconds);
     if (locallyDetectedHome) {
       ant.direction = blendDirections(ant.direction, locallyDetectedHome.direction, 0.94);
       return locallyDetectedHome.distance;
     }
-    if (homeTrail) {
-      ant.direction = blendDirections(ant.direction, homeTrail.direction, this.trailInfluence);
+    if (navigationSuggestion) {
+      ant.direction = blendDirections(
+        ant.direction,
+        navigationSuggestion.direction,
+        navigationSuggestion.influence ?? this.trailInfluence,
+      );
     }
     return Infinity;
   }

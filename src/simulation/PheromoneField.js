@@ -1,6 +1,7 @@
 export const PheromoneType = Object.freeze({
   HOME: "HOME",
   FOOD: "FOOD",
+  ALARM: "ALARM",
 });
 
 export class PheromoneField {
