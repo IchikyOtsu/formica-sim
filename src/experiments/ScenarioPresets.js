@@ -1,4 +1,5 @@
 import { DEFAULT_CONFIG } from "../simulation/SimulationConfig.js";
+import { combatProfileOverrides } from "./CombatProfiles.js";
 
 function colonies({ antsA = 50, antsB = 50, stockA = 10, stockB = 10 } = {}) {
   return [
@@ -18,6 +19,14 @@ function colonies({ antsA = 50, antsB = 50, stockA = 10, stockB = 10 } = {}) {
       initialAnts: antsB,
       initialFoodStock: stockB,
     },
+  ];
+}
+
+function combatColonies(profileA, profileB) {
+  const [colonyA, colonyB] = colonies();
+  return [
+    { ...colonyA, ...combatProfileOverrides(profileA) },
+    { ...colonyB, ...combatProfileOverrides(profileB) },
   ];
 }
 
@@ -97,6 +106,21 @@ export const SCENARIO_PRESETS = Object.freeze([
     description: "Ambre commence plus nombreuse, Azur avec davantage de réserves.",
     seed: 53047,
     config: { colonies: colonies({ antsA: 65, antsB: 35, stockA: 6, stockB: 30 }) },
+  },
+  {
+    id: "balanced-combat-v1.2",
+    name: "Combat équilibré V1.2",
+    description: "Défensif contre Agressif, calibrage figé de référence pour le combat local.",
+    seed: 1847,
+    duration: 20_000,
+    config: {
+      colonies: combatColonies("defensive", "aggressive"),
+      foodSources: [
+        { id: "CENTER", x: 400, y: 260, quantity: 140, radius: 22 },
+        { id: "WEST", x: 265, y: 120, quantity: 60, radius: 16 },
+        { id: "EAST", x: 535, y: 400, quantity: 60, radius: 16 },
+      ],
+    },
   },
   {
     id: "reference-v1",

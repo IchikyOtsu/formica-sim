@@ -1,5 +1,6 @@
 import { summarize } from "../src/experiments/AggregateStatistics.js";
 import { ExperimentRunner } from "../src/experiments/ExperimentRunner.js";
+import { COMBAT_PROFILES as PROFILES } from "../src/experiments/CombatProfiles.js";
 import { DEFAULT_CONFIG } from "../src/simulation/SimulationConfig.js";
 
 const argument = (name, fallback) => {
@@ -10,48 +11,6 @@ const argument = (name, fallback) => {
 const seedCount = Math.max(1, Number(argument("seeds", 20)));
 const ticks = Math.max(1, Number(argument("ticks", 20_000)));
 const matchupFilter = argument("matchup", null);
-
-// Profils : mêmes statistiques de combat (santé, puissance) pour tous — seule la
-// décision (seuils IGNORE/AVOID/THREATEN/ATTACK) diffère, pour que l'écart mesuré
-// vienne de la stratégie et non des chiffres bruts.
-const PROFILES = {
-  pacifist: {
-    label: "Pacifique",
-    overrides: {
-      encounterAvoidanceThreshold: 0.15,
-      combatThreatenThreshold: 0.55,
-      combatAttackThreshold: 1,
-      combatFleeHealthRatio: 0.5,
-    },
-  },
-  defensive: {
-    label: "Défensif",
-    overrides: {
-      encounterAvoidanceThreshold: 0.3,
-      combatThreatenThreshold: 0.35,
-      combatAttackThreshold: 0.55,
-      combatFleeHealthRatio: 0.35,
-      // Calibration V1.2 étape 3 : bonus contextuel (alliés/territoire) et
-      // cooldown raccourci quand il combat en position favorable.
-      combatNumbersAdvantageWeight: 0.45,
-      combatTerritorialAdvantageWeight: 0.45,
-      combatAttackCooldownTicks: 4,
-    },
-  },
-  aggressive: {
-    label: "Agressif",
-    overrides: {
-      encounterAvoidanceThreshold: 0.75,
-      combatThreatenThreshold: 0.15,
-      combatAttackThreshold: 0.25,
-      // Calibration V1.2 étape 3 : attaquer coûte plus cher (énergie + cooldown)
-      // et l'acharnement à faible santé est un peu plus limité.
-      combatFleeHealthRatio: 0.22,
-      combatAttackEnergyCost: 10,
-      combatAttackCooldownTicks: 8,
-    },
-  },
-};
 
 function baseColonies() {
   return [
