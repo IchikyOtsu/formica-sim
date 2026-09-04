@@ -34,6 +34,13 @@ export const CONFIG_SECTIONS = Object.freeze({
     "territoryEvaporationRate", "territoryDiffusionRate", "territoryMinimumIntensity",
     "territoryAvoidanceInfluence", "encounterAvoidanceInfluence", "encounterAvoidanceThreshold",
   ]),
+  combat: Object.freeze([
+    "combatEnabled", "combatRadius", "combatMaxHealth", "combatAttackPower",
+    "combatAttackCooldownTicks", "combatAttackEnergyCost", "combatDamageRandomMin",
+    "combatDamageRandomMax", "combatThreatenThreshold", "combatAttackThreshold",
+    "combatFleeHealthRatio", "combatThreatenAlarmStrength", "combatThreatenTerritoryStrength",
+    "combatDeathAlarmStrength",
+  ]),
   demography: Object.freeze([
     "initialFoodStock", "reproductionEnabled", "queenLayingCooldownTicks",
     "reproductionFoodThreshold", "eggFoodCost", "maxBrood", "maxWorkers",
@@ -100,6 +107,7 @@ export function validateFlatConfig(config) {
   for (const key of [
     "width", "height", "tickDurationMs", "antMaxEnergy", "territoryUpdateInterval",
     "pheromoneCellSize", "pheromoneMaxIntensity", "seasonDurationTicks", "territoryFalloffDistance",
+    "combatRadius", "combatMaxHealth",
   ]) {
     if (config[key] <= 0) fail(key, "doit être positif");
   }
@@ -109,6 +117,8 @@ export function validateFlatConfig(config) {
     "pheromoneMinimumIntensity", "alarmMinimumIntensity", "foreignDetectionRadius",
     "territoryMinimumInfluence", "territoryContestThreshold", "territoryDepositStrength",
     "territoryMinimumIntensity", "territoryAvoidanceInfluence", "encounterAvoidanceInfluence",
+    "combatAttackPower", "combatAttackEnergyCost", "combatDamageRandomMin", "combatDamageRandomMax",
+    "combatThreatenAlarmStrength", "combatThreatenTerritoryStrength", "combatDeathAlarmStrength",
   ]) {
     if (config[key] < 0) fail(key, "ne peut pas être négatif");
   }
@@ -116,8 +126,15 @@ export function validateFlatConfig(config) {
     "pheromoneEvaporationRate", "pheromoneDiffusionRate", "alarmEvaporationRate",
     "alarmDiffusionRate", "lowEnergyThreshold", "resumeEnergyThreshold",
     "territoryEvaporationRate", "territoryDiffusionRate", "encounterAvoidanceThreshold",
+    "combatThreatenThreshold", "combatAttackThreshold", "combatFleeHealthRatio",
   ]) {
     if (config[key] < 0 || config[key] > 1) fail(key, "doit être compris entre 0 et 1");
+  }
+  if (config.combatDamageRandomMax < config.combatDamageRandomMin) {
+    fail("combatDamageRandomMax", "doit être supérieur ou égal à combatDamageRandomMin");
+  }
+  if (!Number.isInteger(config.combatAttackCooldownTicks) || config.combatAttackCooldownTicks < 0) {
+    fail("combatAttackCooldownTicks", "entier positif ou nul attendu");
   }
   if (!Number.isInteger(config.seed)) fail("seed", "entier attendu");
   if (!Number.isInteger(config.territoryUpdateInterval)) {

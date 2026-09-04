@@ -23,6 +23,10 @@ export class Ant {
     maxEnergy = 100,
     energyConsumptionRate = 0,
     lowEnergyThreshold = 0.4,
+    health,
+    maxHealth = 60,
+    attackPower = 0,
+    combatCooldown = 0,
   }) {
     this.id = id;
     this.position = { ...position };
@@ -34,6 +38,10 @@ export class Ant {
     this.maxEnergy = maxEnergy;
     this.energyConsumptionRate = energyConsumptionRate;
     this.lowEnergyThreshold = lowEnergyThreshold;
+    this.maxHealth = maxHealth;
+    this.health = health ?? maxHealth;
+    this.attackPower = attackPower;
+    this.combatCooldown = combatCooldown;
     this.carryingFood = false;
     this.carryingFoodAmount = 0;
     this.age = 0;

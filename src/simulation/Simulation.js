@@ -40,6 +40,10 @@ function seededRandom(seed) {
   };
 }
 
+function pairKey(first, second) {
+  return first.id < second.id ? `${first.id}:${second.id}` : `${second.id}:${first.id}`;
+}
+
 function deterministicEventRoll(seed, tick, antId, zoneId) {
   const text = `${seed}:${tick}:${antId}:${zoneId}`;
   let hash = 2166136261;
@@ -179,6 +183,13 @@ export class Simulation {
     this.previousForeignContacts = new Set();
     this.foreignContacts = 0;
     this.avoidedContacts = 0;
+    this.threats = 0;
+    this.fights = 0;
+    this.attacks = 0;
+    this.damageDealt = 0;
+    this.combatDeaths = 0;
+    this.activeCombats = new Map();
+    this.currentForeignContacts = [];
 
     for (const colony of this.colonies) {
       const colonyConfig = this.colonyConfigs.get(colony.id);
@@ -200,6 +211,8 @@ export class Simulation {
           maxEnergy: colonyConfig.antMaxEnergy,
           energyConsumptionRate: colonyConfig.energyConsumptionRate,
           lowEnergyThreshold: colonyConfig.lowEnergyThreshold,
+          maxHealth: colonyConfig.combatMaxHealth,
+          attackPower: colonyConfig.combatAttackPower,
         }));
       }
       this.nextAntIds.set(colony.id, colonyConfig.initialAnts + 1);
@@ -277,6 +290,7 @@ export class Simulation {
       const field = this.colonyPheromones.get(colony.id);
       for (const ant of colony.ants) {
       if (ant.state === AntState.DEAD) continue;
+      if (this.config.combatEnabled && ant.combatCooldown > 0) ant.combatCooldown -= 1;
 
       if (ant.state === AntState.RESTING) {
         ant.age += deltaSeconds;
@@ -462,6 +476,7 @@ export class Simulation {
       colony.maxPopulation = Math.max(colony.maxPopulation, colonyPopulation);
     }
     this.updateForeignContacts();
+    this.resolveCombat();
     if (this.colonies.length > 1 && this.tickCount % this.config.territoryUpdateInterval === 0) {
       this.territoryMap.update(this.pheromoneFields, this.colonies.map(({ id }) => id), {
         minimumInfluence: this.config.territoryMinimumInfluence,
@@ -488,10 +503,28 @@ export class Simulation {
     }
   }
 
-  handleDeath(ant, cause = "STARVATION", colony = this.colonyForAnt(ant)) {
+  handleDeath(ant, cause = "STARVATION", colony = this.colonyForAnt(ant), extra = {}) {
     const colonyConfig = this.colonyConfigs.get(colony.id);
     const field = this.colonyPheromones.get(colony.id);
-    if (cause === "ENVIRONMENT") {
+    if (cause === "COMBAT") {
+      this.combatDeaths += 1;
+      colony.combatLosses += 1;
+      if (extra.killerColony) extra.killerColony.kills += 1;
+      this.emitEvent("COMBAT_DEATH", {
+        colonyId: colony.id,
+        antId: ant.id,
+        killerColonyId: extra.killerColony?.id ?? null,
+        killerAntId: extra.killerId ?? null,
+      });
+      if (colonyConfig.pheromonesEnabled && colonyConfig.alarmPheromonesEnabled) {
+        this.alarmDeposit.depositDeath(
+          ant.position,
+          field,
+          colonyConfig.combatDeathAlarmStrength,
+        );
+        this.deathAlarmDeposits += 1;
+      }
+    } else if (cause === "ENVIRONMENT") {
       this.environmentalDeaths += 1;
       colony.environmentalDeaths += 1;
       this.emitEvent("ENVIRONMENTAL_DEATH", { antId: ant.id, colonyId: colony.id });
@@ -555,8 +588,12 @@ export class Simulation {
   }
 
   updateForeignContacts() {
-    if (this.colonies.length < 2) return;
+    if (this.colonies.length < 2) {
+      this.currentForeignContacts = [];
+      return;
+    }
     const contacts = this.foreignAntDetection.update(this.colonies, this.config.foreignDetectionRadius);
+    this.currentForeignContacts = contacts;
     const current = new Set(contacts.map(({ key }) => key));
     for (const contact of contacts) {
       if (this.previousForeignContacts.has(contact.key)) continue;
@@ -594,6 +631,160 @@ export class Simulation {
     this.emitEvent("FOREIGN_AVOIDANCE", { colonyId: colony.id, antId: ant.id });
   }
 
+  countNearbyAllies(ant, colony, radius) {
+    const radiusSquared = radius * radius;
+    let count = 0;
+    for (const other of colony.ants) {
+      if (other === ant || other.state === AntState.DEAD) continue;
+      const dx = other.position.x - ant.position.x;
+      const dy = other.position.y - ant.position.y;
+      if (dx * dx + dy * dy <= radiusSquared) count += 1;
+    }
+    return count;
+  }
+
+  resolveCombat() {
+    if (this.colonies.length < 2) return;
+    const combatRadiusSquared = this.config.combatRadius * this.config.combatRadius;
+    const nearby = this.currentForeignContacts.filter(({ first, second }) => {
+      const dx = first.position.x - second.position.x;
+      const dy = first.position.y - second.position.y;
+      return dx * dx + dy * dy <= combatRadiusSquared;
+    });
+    if (nearby.length === 0) {
+      this.updateCombatLifecycle([]);
+      return;
+    }
+
+    const stances = new Map();
+    const intents = [];
+    const evaluated = new Set();
+    for (const { first, second } of nearby) {
+      for (const [ant, opponent] of [[first, second], [second, first]]) {
+        if (evaluated.has(ant.id)) continue;
+        evaluated.add(ant.id);
+        const colonyConfig = this.colonyConfigs.get(ant.colonyId);
+        if (!colonyConfig.combatEnabled) continue;
+        const colony = this.colonyForAnt(ant);
+        const opponentColony = this.colonyForAnt(opponent);
+        const allyCount = this.countNearbyAllies(ant, colony, colonyConfig.foreignDetectionRadius);
+        const ownField = this.colonyPheromones.get(ant.colonyId);
+        const foreignField = this.colonyPheromones.get(opponent.colonyId);
+        const ownInfluence = ownField.sample(PheromoneType.TERRITORY, ant.position) / ownField.maxIntensity;
+        const foreignInfluence = foreignField.sample(PheromoneType.TERRITORY, ant.position)
+          / foreignField.maxIntensity;
+        const stance = this.encounterReaction.evaluateStance(ant, {
+          allyCount,
+          enemyCount: ant.nearbyForeignAnts.length,
+          territorialAdvantage: ownInfluence - foreignInfluence,
+          threatenThreshold: colonyConfig.combatThreatenThreshold,
+          attackThreshold: colonyConfig.combatAttackThreshold,
+          fleeHealthRatio: colonyConfig.combatFleeHealthRatio,
+        });
+        stances.set(ant.id, { stance, ant, opponent, colony, opponentColony });
+        if (stance === EncounterReaction.ATTACK) {
+          intents.push({ attacker: ant, defender: opponent, colony, opponentColony });
+        }
+      }
+    }
+
+    for (const { stance, ant, opponent, colony, opponentColony } of stances.values()) {
+      if (stance === EncounterReaction.AVOID) {
+        const dx = ant.position.x - opponent.position.x;
+        const dy = ant.position.y - opponent.position.y;
+        ant.direction = (dx === 0 && dy === 0) ? ant.direction : Math.atan2(dy, dx);
+      } else if (stance === EncounterReaction.THREATEN) {
+        this.applyThreaten(ant, opponent, colony, opponentColony);
+      }
+    }
+
+    for (const { attacker, defender, colony, opponentColony } of intents) {
+      this.resolveAttack(attacker, defender, colony, opponentColony);
+    }
+
+    const stillNearby = nearby.filter(({ first, second }) => (
+      first.state !== AntState.DEAD && second.state !== AntState.DEAD
+    ));
+    this.updateCombatLifecycle(stillNearby);
+  }
+
+  applyThreaten(ant, opponent, colony, opponentColony) {
+    const colonyConfig = this.colonyConfigs.get(ant.colonyId);
+    const field = this.colonyPheromones.get(ant.colonyId);
+    const dx = opponent.position.x - ant.position.x;
+    const dy = opponent.position.y - ant.position.y;
+    ant.direction = (dx === 0 && dy === 0) ? ant.direction : Math.atan2(dy, dx);
+    field.deposit(PheromoneType.TERRITORY, ant.position, colonyConfig.combatThreatenTerritoryStrength);
+    field.deposit(PheromoneType.ALARM, ant.position, colonyConfig.combatThreatenAlarmStrength);
+    this.threats += 1;
+    this.emitEvent("FOREIGN_THREAT", {
+      colonyId: colony.id,
+      antId: ant.id,
+      foreignColonyId: opponentColony.id,
+      foreignAntId: opponent.id,
+    });
+  }
+
+  resolveAttack(attacker, defender, colony, opponentColony) {
+    const attackerConfig = this.colonyConfigs.get(attacker.colonyId);
+    const key = pairKey(attacker, defender);
+    if (!this.activeCombats.has(key)) {
+      this.activeCombats.set(key, {
+        firstId: attacker.id,
+        firstColonyId: colony.id,
+        secondId: defender.id,
+        secondColonyId: opponentColony.id,
+      });
+      this.fights += 1;
+      colony.fights += 1;
+      opponentColony.fights += 1;
+      this.emitEvent("COMBAT_STARTED", {
+        colonyId: colony.id,
+        antId: attacker.id,
+        foreignColonyId: opponentColony.id,
+        foreignAntId: defender.id,
+      });
+    }
+    const roll = deterministicEventRoll(this.config.seed, this.tickCount, attacker.id, defender.id);
+    const randomFactor = attackerConfig.combatDamageRandomMin
+      + roll * (attackerConfig.combatDamageRandomMax - attackerConfig.combatDamageRandomMin);
+    const damage = attacker.attackPower * randomFactor;
+    defender.health -= damage;
+    attacker.energy = Math.max(0, attacker.energy - attackerConfig.combatAttackEnergyCost);
+    attacker.combatCooldown = attackerConfig.combatAttackCooldownTicks;
+    this.attacks += 1;
+    colony.attacks += 1;
+    this.damageDealt += damage;
+    this.emitEvent("ANT_ATTACKED", {
+      colonyId: colony.id,
+      antId: attacker.id,
+      foreignColonyId: opponentColony.id,
+      foreignAntId: defender.id,
+      damage,
+    });
+    if (defender.health <= 0 && defender.state !== AntState.DEAD) {
+      defender.state = AntState.DEAD;
+      this.handleDeath(defender, "COMBAT", opponentColony, {
+        killerId: attacker.id,
+        killerColony: colony,
+      });
+    }
+  }
+
+  updateCombatLifecycle(stillNearbyPairs) {
+    const currentKeys = new Set(stillNearbyPairs.map(({ first, second }) => pairKey(first, second)));
+    for (const [key, info] of [...this.activeCombats]) {
+      if (currentKeys.has(key)) continue;
+      this.emitEvent("COMBAT_ENDED", {
+        colonyId: info.firstColonyId,
+        antId: info.firstId,
+        foreignColonyId: info.secondColonyId,
+        foreignAntId: info.secondId,
+      });
+      this.activeCombats.delete(key);
+    }
+  }
+
   spawnWorker(colony = this.colony) {
     const colonyConfig = this.colonyConfigs.get(colony.id);
     const nest = colony.nest;
@@ -614,6 +805,8 @@ export class Simulation {
       maxEnergy: colonyConfig.antMaxEnergy,
       energyConsumptionRate: colonyConfig.energyConsumptionRate,
       lowEnergyThreshold: colonyConfig.lowEnergyThreshold,
+      maxHealth: colonyConfig.combatMaxHealth,
+      attackPower: colonyConfig.combatAttackPower,
     });
     this.nextAntIds.set(colony.id, this.nextAntIds.get(colony.id) + 1);
     colony.ants.push(ant);
@@ -801,6 +994,10 @@ export class Simulation {
       totalPickups: colony.totalPickups,
       foreignContacts: colony.foreignContacts,
       avoidedContacts: colony.avoidedContacts,
+      fights: colony.fights,
+      attacks: colony.attacks,
+      kills: colony.kills,
+      combatLosses: colony.combatLosses,
       territoryCells: this.territoryMap.getStats().controlled[colony.id] ?? 0,
       foodPheromones,
       homePheromones,
@@ -933,6 +1130,11 @@ export class Simulation {
       colonyCount: colonies.length,
       foreignContacts: this.foreignContacts,
       avoidedContacts: this.avoidedContacts,
+      threats: this.threats,
+      fights: this.fights,
+      attacks: this.attacks,
+      damageDealt: this.damageDealt,
+      combatDeaths: this.combatDeaths,
       territory,
       contestedArea: territory.contested,
       elapsedMs: this.elapsedMs,

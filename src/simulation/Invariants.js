@@ -12,9 +12,15 @@ export function inspectSimulationInvariants(simulation) {
     if (ant.energy < -EPSILON || ant.energy > ant.maxEnergy + EPSILON) {
       add("worker-energy-bounds", `${ant.id}: ${ant.energy}`);
     }
+    if (ant.health > ant.maxHealth + EPSILON) {
+      add("worker-health-bounds", `${ant.id}: ${ant.health}`);
+    }
     if (!simulation.world.contains(ant.position)) add("worker-inside-world", ant.id);
     if (ant.state === AntState.DEAD && (ant.carryingFood || ant.target !== null)) {
       add("dead-worker-inert", ant.id);
+    }
+    if (ant.state !== AntState.DEAD && ant.health <= 0) {
+      add("living-worker-positive-health", `${ant.id}: ${ant.health}`);
     }
   }
   for (const colony of simulation.colonies) {

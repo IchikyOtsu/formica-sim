@@ -1445,6 +1445,190 @@ test("a full-energy single foreign contact is ignored and not counted as avoidan
   assert.equal(simulation.getMetrics().avoidedContacts, 0);
 });
 
+function combatConfig(overrides = {}) {
+  return multiColonyConfig({
+    combatRadius: 10,
+    combatAttackThreshold: 0,
+    combatThreatenThreshold: 0,
+    combatFleeHealthRatio: 0,
+    lowEnergyThreshold: 0,
+    ...overrides,
+  });
+}
+
+test("no attack ever occurs between allies of the same colony", () => {
+  const simulation = new Simulation(combatConfig());
+  const colonyA = simulation.colonies[0];
+  const ally = new Ant({
+    id: "A-ANT-002", position: { x: 100, y: 50 }, direction: 0, speed: 0, colonyId: "A",
+  });
+  ally.maxHealth = colonyA.ants[0].maxHealth;
+  ally.health = ally.maxHealth;
+  ally.attackPower = colonyA.ants[0].attackPower;
+  colonyA.ants.push(ally);
+  colonyA.ants[0].position = { x: 101, y: 50 };
+  simulation.tick();
+  assert.equal(simulation.tickEvents.some((event) => event.type === "ANT_ATTACKED"), false);
+  assert.equal(ally.health, ally.maxHealth);
+});
+
+test("a dead ant cannot attack and is never targeted as an active combatant", () => {
+  const simulation = new Simulation(combatConfig());
+  const [antA, antB] = simulation.colonies.map((colony) => colony.ants[0]);
+  antA.position = { x: 100, y: 50 };
+  antB.position = { x: 102, y: 50 };
+  antB.state = AntState.DEAD;
+  const healthBefore = antB.health;
+  simulation.tick();
+  assert.equal(simulation.tickEvents.some((event) => (
+    event.type === "ANT_ATTACKED" || event.type === "COMBAT_STARTED"
+  )), false);
+  assert.equal(antB.health, healthBefore);
+});
+
+test("combat damage is deterministic for an identical seed, config, and tick", () => {
+  const config = combatConfig();
+  const runOnce = () => {
+    const simulation = new Simulation(config);
+    const [antA, antB] = simulation.colonies.map((colony) => colony.ants[0]);
+    antA.position = { x: 100, y: 50 };
+    antB.position = { x: 102, y: 50 };
+    simulation.tick();
+    return antB.health;
+  };
+  assert.equal(runOnce(), runOnce());
+});
+
+test("mutual attacks resolve fairly: both ants land their hit even if one dies", () => {
+  const simulation = new Simulation(combatConfig({
+    combatAttackPower: 1000,
+    combatDamageRandomMin: 1,
+    combatDamageRandomMax: 1,
+  }));
+  const [antA, antB] = simulation.colonies.map((colony) => colony.ants[0]);
+  antA.position = { x: 100, y: 50 };
+  antB.position = { x: 102, y: 50 };
+  simulation.tick();
+  assert.ok(antA.health <= 0);
+  assert.ok(antB.health <= 0);
+  assert.equal(simulation.getMetrics().attacks, 2);
+  assert.equal(simulation.getMetrics().fights, 1);
+});
+
+test("combat outcome totals are independent of colony declaration order", () => {
+  const forward = combatConfig();
+  const backward = combatConfig({ colonies: [...combatConfig().colonies].reverse() });
+  const run = (config) => {
+    const simulation = new Simulation(config);
+    const [first, second] = simulation.colonies.map((colony) => colony.ants[0]);
+    first.position = { x: 100, y: 50 };
+    second.position = { x: 102, y: 50 };
+    simulation.tick();
+    return { attacks: simulation.getMetrics().attacks, deaths: simulation.getMetrics().combatDeaths };
+  };
+  assert.deepEqual(run(forward), run(backward));
+});
+
+test("a combat death is tagged with cause COMBAT and credits the killer's colony", () => {
+  const simulation = new Simulation(combatConfig({ combatAttackPower: 1000 }));
+  const [antA, antB] = simulation.colonies.map((colony) => colony.ants[0]);
+  antA.position = { x: 100, y: 50 };
+  antB.position = { x: 102, y: 50 };
+  antB.attackPower = 0;
+  simulation.tick();
+  assert.equal(antB.state, AntState.DEAD);
+  const deathEvent = simulation.tickEvents.find((event) => event.type === "COMBAT_DEATH");
+  assert.ok(deathEvent);
+  assert.equal(deathEvent.colonyId, "B");
+  assert.equal(deathEvent.killerColonyId, "A");
+  assert.equal(simulation.getColonyMetrics("B").combatLosses, 1);
+  assert.equal(simulation.getColonyMetrics("A").kills, 1);
+  assert.equal(simulation.tickEvents.some((event) => event.type === "WORKER_DIED"), false);
+  assert.equal(simulation.tickEvents.some((event) => event.type === "ENVIRONMENTAL_DEATH"), false);
+});
+
+test("a combat death deposits ALARM distinctly from an environmental death", () => {
+  const simulation = new Simulation(combatConfig({ combatAttackPower: 1000 }));
+  const [antA, antB] = simulation.colonies.map((colony) => colony.ants[0]);
+  antA.position = { x: 100, y: 50 };
+  antB.position = { x: 102, y: 50 };
+  antB.attackPower = 0;
+  simulation.tick();
+  assert.ok(simulation.colonyPheromones.get("B").getStats(PheromoneType.ALARM).total > 0);
+});
+
+test("the energy cost of an attack is applied exactly once per attack action", () => {
+  const simulation = new Simulation(combatConfig({ basalEnergyConsumptionRate: 0 }));
+  const [antA, antB] = simulation.colonies.map((colony) => colony.ants[0]);
+  antA.position = { x: 100, y: 50 };
+  antB.position = { x: 102, y: 50 };
+  antB.attackPower = 0;
+  const energyBefore = antA.energy;
+  simulation.tick();
+  assert.equal(antA.energy, energyBefore - simulation.config.combatAttackEnergyCost);
+  assert.equal(antA.combatCooldown, simulation.config.combatAttackCooldownTicks);
+  const energyAfterFirstAttack = antA.energy;
+  simulation.tick();
+  assert.equal(antA.energy, energyAfterFirstAttack);
+});
+
+test("THREATEN produces no damage while still emitting a dedicated event", () => {
+  const simulation = new Simulation(combatConfig({
+    combatAttackThreshold: 1,
+    combatThreatenThreshold: 0,
+  }));
+  const [antA, antB] = simulation.colonies.map((colony) => colony.ants[0]);
+  antA.position = { x: 100, y: 50 };
+  antB.position = { x: 102, y: 50 };
+  const healthBefore = antA.health;
+  simulation.tick();
+  assert.equal(antA.health, healthBefore);
+  assert.equal(antB.health, antB.maxHealth);
+  assert.equal(simulation.tickEvents.some((event) => event.type === "ANT_ATTACKED"), false);
+  assert.ok(simulation.tickEvents.some((event) => event.type === "FOREIGN_THREAT"));
+});
+
+test("combat.enabled = false reproduces the V1.2-step-1 behavior exactly", () => {
+  const simulation = new Simulation(combatConfig({
+    combatEnabled: false,
+    combatAttackThreshold: 0,
+    combatThreatenThreshold: 0,
+  }));
+  const [antA, antB] = simulation.colonies.map((colony) => colony.ants[0]);
+  antA.position = { x: 100, y: 50 };
+  antB.position = { x: 102, y: 50 };
+  for (let index = 0; index < 5; index += 1) simulation.tick();
+  const combatEventTypes = new Set([
+    "FOREIGN_THREAT", "COMBAT_STARTED", "ANT_ATTACKED", "COMBAT_DEATH", "COMBAT_ENDED",
+  ]);
+  assert.equal(simulation.tickEvents.some((event) => combatEventTypes.has(event.type)), false);
+  assert.equal(antA.health, antA.maxHealth);
+  assert.equal(antB.health, antB.maxHealth);
+  assert.equal(simulation.getMetrics().attacks, 0);
+  assert.equal(simulation.getMetrics().combatDeaths, 0);
+});
+
+test("combat runs preserve exact replay and food conservation", async () => {
+  const config = combatConfig({
+    combatAttackPower: 1000,
+    colonies: multiColonyConfig().colonies.map((colony) => ({
+      ...colony,
+      nest: { ...colony.nest, x: colony.id === "A" ? 95 : 105 },
+    })),
+  });
+  const direct = new Simulation(config);
+  direct.run(20);
+  assert.equal(assertSimulationInvariants(direct).valid, true);
+  const replayed = new Simulation(config);
+  const previousAnimationFrame = globalThis.requestAnimationFrame;
+  globalThis.requestAnimationFrame = (callback) => setImmediate(callback);
+  try {
+    assert.equal(await new ReplayController(replayed).seek(20, { chunkSize: 6 }), true);
+  } finally {
+    globalThis.requestAnimationFrame = previousAnimationFrame;
+  }
+});
+
 test("multi-colony replay and global food conservation are exact", async () => {
   const direct = new Simulation(multiColonyConfig());
   direct.run(40);

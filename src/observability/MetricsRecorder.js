@@ -18,6 +18,11 @@ export const RECORDED_METRICS = Object.freeze([
   "hazardExposures",
   "foreignContacts",
   "avoidedContacts",
+  "threats",
+  "fights",
+  "attacks",
+  "damageDealt",
+  "combatDeaths",
   "contestedArea",
   "colonies",
 ]);
@@ -51,6 +56,11 @@ export class MetricsRecorder {
       hazardExposures: metrics.dangerExposures,
       foreignContacts: metrics.foreignContacts,
       avoidedContacts: metrics.avoidedContacts,
+      threats: metrics.threats,
+      fights: metrics.fights,
+      attacks: metrics.attacks,
+      damageDealt: metrics.damageDealt,
+      combatDeaths: metrics.combatDeaths,
       contestedArea: metrics.contestedArea,
       colonies: metrics.colonies.map((colony) => ({
         id: colony.id,
@@ -60,6 +70,10 @@ export class MetricsRecorder {
         territoryCells: colony.territoryCells,
         foreignContacts: colony.foreignContacts,
         avoidedContacts: colony.avoidedContacts,
+        fights: colony.fights,
+        attacks: colony.attacks,
+        kills: colony.kills,
+        combatLosses: colony.combatLosses,
       })),
     });
   }

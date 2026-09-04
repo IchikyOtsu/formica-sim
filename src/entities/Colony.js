@@ -18,6 +18,10 @@ export class Colony {
     this.totalPickups = 0;
     this.foreignContacts = 0;
     this.avoidedContacts = 0;
+    this.fights = 0;
+    this.attacks = 0;
+    this.kills = 0;
+    this.combatLosses = 0;
     this.maxPopulation = 1;
   }
 
