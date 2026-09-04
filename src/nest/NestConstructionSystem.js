@@ -4,6 +4,11 @@ const CONSTRUCTIBLE_TYPES = Object.freeze([
   NestChamberType.STORAGE,
   NestChamberType.REST,
   NestChamberType.BROOD,
+  // V1.5.4 : une entrée saturée (beaucoup de trafic entrant/sortant) peut
+  // elle aussi être doublée — c'est exactement le même déclencheur
+  // générique (occupation instantanée >= nestChamberCapacity), rendu
+  // vraiment utile une fois la congestion (V1.5.4.2) activée.
+  NestChamberType.ENTRANCE,
 ]);
 
 // Décide QUAND ouvrir un nouveau chantier — jamais COMMENT creuser (ça reste
@@ -43,6 +48,7 @@ export class NestConstructionSystem {
       anchorId: anchor.id,
       progress: 0,
       requiredProgress: config.nestBuildTicks,
+      exitAngle: type === NestChamberType.ENTRANCE ? angle : null,
     };
     interior.nextSiteId += 1;
     interior.pendingSites.set(site.id, site);

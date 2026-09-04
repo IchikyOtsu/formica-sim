@@ -24,7 +24,12 @@ function chamberLabel(chamber) {
 // chambre QUEEN/BROOD d'origine, une fois d'une seule variante ou la
 // colonie en construit plusieurs.
 export class NestRenderer {
-  render(ctx, canvas, colony, interior, tickCount = 0, nestInteriorEnabled = true) {
+  // `allColonies` (V1.5.4) : par défaut juste [colony], suffisant tant
+  // qu'aucun intrus n'existe. Nécessaire dès qu'une fourmi étrangère peut
+  // occuper ce nid (raider ayant breaché) — elle vit dans SA propre colonie
+  // (`colony.ants`), pas dans celle qu'on regarde, donc il faut chercher
+  // dans toutes les colonies celles dont `nestId` pointe ici.
+  render(ctx, canvas, colony, interior, tickCount = 0, nestInteriorEnabled = true, allColonies = [colony]) {
     const width = canvas.width;
     const height = canvas.height;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -36,14 +41,20 @@ export class NestRenderer {
     const scale = Math.min(width / bounds.width, height / bounds.height);
     ctx.setTransform(scale, 0, 0, scale, width / 2 - bounds.centerX * scale, height / 2 - bounds.centerY * scale);
 
+    const occupants = allColonies.flatMap((candidate) => candidate.ants)
+      .filter((ant) => ant.locationType === "NEST" && ant.nestId === colony.id && ant.state !== AntState.DEAD);
+    const threatenedChamberIds = new Set(
+      occupants.filter((ant) => ant.state === AntState.RAIDING_INSIDE).map((ant) => ant.nestChamberId),
+    );
+
     this.drawCorridors(ctx, interior);
     for (const chamber of interior.chambers.values()) {
-      this.drawChamber(ctx, chamber, colony);
+      this.drawChamber(ctx, chamber, colony, threatenedChamberIds.has(chamber.id));
     }
     this.drawConstructionSites(ctx, interior, colony);
     this.drawQueen(ctx, interior, colony);
     this.drawBrood(ctx, interior, colony);
-    this.drawAnts(ctx, interior, colony, tickCount);
+    this.drawAnts(ctx, occupants, tickCount);
 
     if (!nestInteriorEnabled) this.drawDisabledNotice(ctx, width, height);
   }

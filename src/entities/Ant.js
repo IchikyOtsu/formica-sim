@@ -7,6 +7,8 @@ export const AntState = Object.freeze({
   RAIDING: "RAIDING",
   DEFENDING: "DEFENDING",
   IN_NEST: "IN_NEST",
+  RAIDING_INSIDE: "RAIDING_INSIDE",
+  DEFENDING_INSIDE: "DEFENDING_INSIDE",
   DEAD: "DEAD",
 });
 

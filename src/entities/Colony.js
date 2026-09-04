@@ -55,6 +55,7 @@ export class Colony {
     this.broodFoodBuffer = 0;
     this.broodFoodDelivered = 0;
     this.chambersBuilt = 0;
+    this.nestBreaches = 0;
   }
 
   depositFood(amount) {

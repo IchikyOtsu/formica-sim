@@ -17,6 +17,7 @@ export function drawAnt2D(ctx, {
   resting = false,
   tending = false,
   building = false,
+  fighting = false,
   legPhase = 0,
 }) {
   const isSoldier = caste === Caste.SOLDIER;
@@ -39,6 +40,13 @@ export function drawAnt2D(ctx, {
     ctx.arc(0, 0, 2.6, 0, Math.PI * 2);
     ctx.strokeStyle = "rgba(150, 210, 235, 0.6)";
     ctx.lineWidth = 0.5 / bodyScale;
+    ctx.stroke();
+  }
+  if (fighting) {
+    ctx.beginPath();
+    ctx.arc(0, 0, 3.6, 0, Math.PI * 2);
+    ctx.strokeStyle = "rgba(224, 74, 58, 0.75)";
+    ctx.lineWidth = 0.6 / bodyScale;
     ctx.stroke();
   }
 

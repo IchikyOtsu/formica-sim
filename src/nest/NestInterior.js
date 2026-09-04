@@ -53,13 +53,26 @@ export class NestInterior {
     return [...this.chambers.values()].filter((chamber) => chamber.type === type);
   }
 
+  // Parmi les chambres d'un type donné, celle qui a le moins d'occupantes
+  // actuellement — répartition de charge simple, réutilisée pour router les
+  // fourmis (V1.5.3) comme pour choisir une entrée (V1.5.4). Déterministe :
+  // en cas d'égalité, la première par ordre d'insertion l'emporte.
+  leastLoadedChamberOfType(type) {
+    const candidates = this.getChambersByType(type);
+    return candidates.reduce((best, chamber) => (
+      chamber.occupants.size < best.occupants.size ? chamber : best
+    ), candidates[0]);
+  }
+
   // Ajoute une chambre construite dynamiquement, reliée par un corridor à la
   // chambre "ancre" depuis laquelle elle a été creusée. L'ID est dérivé du
   // type + d'un compteur (STORAGE-2, STORAGE-3, ...) pour rester lisible.
-  addChamber(type, position, anchorId) {
+  // `exitAngle` n'est utile que pour une chambre ENTRANCE : l'angle de
+  // sortie côté monde, fixe et déterministe pour cette entrée précise.
+  addChamber(type, position, anchorId, exitAngle = null) {
     const existingOfType = this.getChambersByType(type).length;
     const id = existingOfType === 0 ? type : `${type}-${existingOfType + 1}`;
-    const chamber = new NestChamber({ id, type, position });
+    const chamber = new NestChamber({ id, type, position, exitAngle });
     this.chambers.set(id, chamber);
     this.corridors.push([anchorId, id]);
     return chamber;

@@ -66,7 +66,8 @@ export const CONFIG_SECTIONS = Object.freeze({
     "nestInternalFoodCarry", "nestTendBroodTicks", "nestBroodCareBonus",
     "nestConstructionEnabled", "nestChamberCapacity", "nestBuildTicks",
     "nestBuildFoodCost", "nestChamberSpacing", "nestMaxConcurrentSites",
-    "nestMaxActiveBuilders",
+    "nestMaxActiveBuilders", "nestCongestionEnabled", "nestCongestionSlowdown",
+    "nestIntrusionEnabled", "nestDefenseBroodMultiplier", "nestDefenseQueenMultiplier",
   ]),
   demography: Object.freeze([
     "initialFoodStock", "reproductionEnabled", "queenLayingCooldownTicks",
@@ -156,7 +157,7 @@ export function validateFlatConfig(config) {
     "threatPressureRatioScale", "nestDefenseAlarmStrength", "threatPressureNestProximityWeight",
     "raidCarryCapacity", "minStockToRaid",
     "nestBroodFeedStockThreshold", "nestInternalFoodCarry", "nestBroodCareBonus",
-    "nestBuildFoodCost",
+    "nestBuildFoodCost", "nestDefenseBroodMultiplier", "nestDefenseQueenMultiplier",
   ]) {
     if (config[key] < 0) fail(key, "ne peut pas être négatif");
   }
@@ -168,6 +169,7 @@ export function validateFlatConfig(config) {
     "soldierCombatAttackThreshold", "soldierCombatThreatenThreshold",
     "soldierEncounterAvoidanceThreshold", "soldierCombatFleeHealthRatio",
     "casteSoldierRatioCap", "threatPressureDecay", "nestCaregiverRatio",
+    "nestCongestionSlowdown",
   ]) {
     if (config[key] < 0 || config[key] > 1) fail(key, "doit être compris entre 0 et 1");
   }

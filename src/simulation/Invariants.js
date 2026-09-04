@@ -41,6 +41,25 @@ export function inspectSimulationInvariants(simulation) {
     if (ant.state === AntState.DEFENDING && ant.caste !== Caste.SOLDIER) {
       add("defender-must-be-soldier", ant.id);
     }
+    if (ant.state === AntState.RAIDING_INSIDE && ant.caste !== Caste.SOLDIER) {
+      add("interior-raider-must-be-soldier", ant.id);
+    }
+    if (ant.state === AntState.DEFENDING_INSIDE && ant.caste !== Caste.SOLDIER) {
+      add("interior-defender-must-be-soldier", ant.id);
+    }
+  }
+  // Une fourmi indoor n'est chez elle QUE si elle n'est pas en train de
+  // piller un nid étranger (V1.5.4) : dans ce cas précis, et uniquement
+  // celui-là, `nestId` doit être une colonie DIFFERENTE de la sienne.
+  for (const colony of simulation.colonies) {
+    for (const ant of colony.ants) {
+      if (ant.locationType !== "NEST") continue;
+      if (ant.state === AntState.RAIDING_INSIDE) {
+        if (ant.nestId === colony.id) add("raiding-inside-must-be-foreign", ant.id);
+      } else if (ant.nestId !== colony.id) {
+        add("own-nest-only-unless-raiding-inside", ant.id);
+      }
+    }
   }
   for (const colony of simulation.colonies) {
     for (const [targetColonyId, intel] of colony.knownEnemyNests) {

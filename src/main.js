@@ -11,7 +11,7 @@ import { NestRenderer } from "./rendering/NestRenderer.js";
 import { Simulation } from "./simulation/Simulation.js";
 import { DEFAULT_CONFIG } from "./simulation/SimulationConfig.js";
 
-const simulation = new Simulation(configForPreset("complete-v1.4"));
+const simulation = new Simulation(configForPreset("complete-latest"));
 const APP_VERSION = "1.1.0";
 const renderer = new Renderer(document.querySelector("#world"));
 const nestRenderer = new NestRenderer();
@@ -576,9 +576,9 @@ for (const category of SCENARIO_CATEGORIES) {
   }
   elements.preset.append(group);
 }
-elements.preset.value = "complete-v1.4";
+elements.preset.value = "complete-latest";
 applyConfigToForm(simulation.config);
-const initialPreset = SCENARIO_PRESETS.find((candidate) => candidate.id === "complete-v1.4");
+const initialPreset = SCENARIO_PRESETS.find((candidate) => candidate.id === "complete-latest");
 if (initialPreset?.duration) elements.replayTick.value = initialPreset.duration;
 
 document.querySelector("#apply-preset").addEventListener("click", () => {

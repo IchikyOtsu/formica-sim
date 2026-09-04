@@ -476,9 +476,15 @@ export const SCENARIO_PRESETS = Object.freeze([
     },
   },
   {
-    id: "complete-v1.4",
-    name: "Simulation complète V1.4",
-    description: "Toutes les couches actives : territoire, ALARM, combat, castes adaptatives, découverte de nid, raids automatiques, pillage et défense de nid. Ambre (défensive) contre Azur (agressive), mêmes règles de castes et de raids des deux côtés — la découverte et les raids restent entièrement organiques (pas de nid connu d'avance).",
+    // Id volontairement sans numéro de version : c'est LA vitrine complète,
+    // toujours tenue à jour avec tout ce qui a été livré depuis le début du
+    // projet (règle explicite du 2026-09-04) — on met à jour ce même preset
+    // à chaque nouvelle fonctionnalité plutôt que d'empiler complete-v1.4,
+    // complete-v1.5, etc. C'est aussi le scénario chargé par défaut au boot
+    // (voir main.js).
+    id: "complete-latest",
+    name: "Simulation complète (dernière version)",
+    description: "Toutes les couches actives : territoire, ALARM, combat, castes adaptatives, découverte de nid, raids automatiques, pillage, défense de nid, vue intérieure du nid et construction dynamique des chambres. Ambre (défensive) contre Azur (agressive), mêmes règles des deux côtés — découverte, raids et construction restent entièrement organiques (rien connu ou construit d'avance). Bascule sur « Vue → Nid A/B » pour suivre l'intérieur en direct.",
     category: "complete",
     seed: 1847,
     duration: 30_000,
@@ -495,6 +501,9 @@ export const SCENARIO_PRESETS = Object.freeze([
       maxRaidSize: 6,
       minStockToRaid: 60,
       raidCooldownTicks: 1500,
+      nestInteriorEnabled: true,
+      nestConstructionEnabled: true,
+      antSpeed: 20,
       colonies: [
         { ...colonies()[0], ...combatProfileOverrides("defensive"), ...completeCastes() },
         { ...colonies()[1], ...combatProfileOverrides("aggressive"), ...completeCastes() },

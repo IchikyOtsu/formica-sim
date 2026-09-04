@@ -107,6 +107,7 @@ export class Simulation {
     this.birthRandom = seededRandom(this.config.seed ^ 0x85ebca6b);
     this.environmentRandom = seededRandom(this.config.seed ^ 0xc2b2ae35);
     this.constructionRandom = seededRandom(this.config.seed ^ 0x2f6e9a17);
+    this.intrusionRandom = seededRandom(this.config.seed ^ 0x6a09e667);
     this.randomWalk = new RandomWalk(this.random, this.config.explorationStrength);
     this.searchFood = new SearchFoodBehavior(this.randomWalk, this.config.pheromoneInfluence);
     this.returnHome = new ReturnHomeBehavior(this.randomWalk, this.config.homeTrailInfluence);
@@ -319,6 +320,7 @@ export class Simulation {
       this.detectNestThreats(colony, colonyConfig);
       this.evaluateAutoRaid(colony, colonyConfig);
       const interior = this.nestInteriors.get(colony.id);
+      this.detectInteriorIntrusion(colony, colonyConfig, interior);
       const broodDemand = colonyConfig.nestInteriorEnabled
         ? this.broodDemandSystem.evaluate(colony, colonyConfig)
         : null;
@@ -333,6 +335,10 @@ export class Simulation {
       }
       for (const ant of colony.ants) {
       if (ant.state === AntState.DEAD) continue;
+      if (ant.state === AntState.RAIDING_INSIDE) {
+        this.updateRaidingInsideAnt(ant, colony, colonyConfig, deltaSeconds);
+        continue;
+      }
       if (ant.locationType === "NEST") {
         const caregiverBefore = ant.nestTask === NestTask.FEED_BROOD || ant.nestTask === NestTask.TEND_BROOD;
         const builderBefore = ant.nestTask === NestTask.BUILD;
@@ -666,7 +672,9 @@ export class Simulation {
       ant.internalFoodCargo = 0;
     }
     if (ant.locationType === "NEST") {
-      this.nestInteriors.get(colony.id)?.removeAnt(ant);
+      // ant.nestId — pas colony.id — car un intrus V1.5.4 meurt dans
+      // l'intérieur ETRANGER qu'il occupait, pas dans le sien.
+      this.nestInteriors.get(ant.nestId)?.removeAnt(ant);
       ant.locationType = "WORLD";
       ant.nestId = null;
       ant.nestPosition = null;
@@ -780,6 +788,50 @@ export class Simulation {
     }
   }
 
+  // Mobilise activement des soldats indoor vers une chambre envahie — sans
+  // ça, la défense intérieure dépendrait du hasard qu'un soldat traîne déjà
+  // au bon endroit au bon moment (constaté explicitement en testant : un
+  // soldat sans tâche ressort du nid en quelques dizaines de ticks, bien
+  // avant qu'un intrus n'y arrive). Le nombre de défenseurs mobilisés par
+  // chambre menacée suit la même priorité que le multiplicateur de dégâts
+  // (STORAGE=1, BROOD=1.5, QUEEN=2.5, arrondi) — "défense moyenne / forte /
+  // maximale" se traduit ici en plus de défenseurs, pas seulement plus de
+  // dégâts par défenseur.
+  detectInteriorIntrusion(colony, colonyConfig, interior) {
+    if (!this.config.combatEnabled || !colonyConfig.nestIntrusionEnabled) return;
+    // les intrus appartiennent à la colonie ATTAQUANTE (colony.ants ne les
+    // contient jamais) — il faut chercher dans toutes les colonies celles
+    // dont `nestId` pointe vers CE nid.
+    const intruders = this.colonies.flatMap((candidate) => candidate.ants).filter((ant) => (
+      ant.state === AntState.RAIDING_INSIDE && ant.nestId === colony.id
+    ));
+    if (intruders.length === 0) return;
+    const threatenedChamberIds = new Set(intruders.map((intruder) => intruder.nestChamberId));
+    for (const chamberId of threatenedChamberIds) {
+      const priorityMultiplier = this.nestDefensePriorityMultiplier(chamberId, interior, colonyConfig);
+      const desiredDefenders = Math.max(1, Math.round(priorityMultiplier));
+      const alreadyDefending = colony.ants.filter((ant) => (
+        ant.state === AntState.DEFENDING_INSIDE
+        && (ant.nestChamberId === chamberId || ant.nestTargetChamberId === chamberId)
+      )).length;
+      let toMobilize = desiredDefenders - alreadyDefending;
+      if (toMobilize <= 0) continue;
+      for (const ant of colony.ants) {
+        if (toMobilize <= 0) break;
+        if (ant.state !== AntState.IN_NEST || ant.caste !== Caste.SOLDIER || ant.locationType !== "NEST") continue;
+        if (ant.nestId !== colony.id) continue;
+        ant.state = AntState.DEFENDING_INSIDE;
+        ant.nestTask = NestTask.NONE;
+        ant.nestPath = null;
+        ant.nestPathIndex = 0;
+        ant.nestTargetChamberId = null;
+        colony.defendersMobilized += 1;
+        this.emitEvent("DEFENDER_MOBILIZED_INSIDE", { colonyId: colony.id, antId: ant.id, chamberId });
+        toMobilize -= 1;
+      }
+    }
+  }
+
   evaluateAutoRaid(colony, colonyConfig) {
     if (!colonyConfig.autoRaidEnabled) return;
     const activeRaidTargets = new Set(
@@ -850,6 +902,52 @@ export class Simulation {
       return;
     }
 
+    if (ant.state === AntState.DEFENDING_INSIDE) {
+      if (this.config.combatEnabled && ant.combatCooldown > 0) ant.combatCooldown -= 1;
+      const intruders = this.colonies.flatMap((candidate) => candidate.ants).filter((candidate) => (
+        candidate.state === AntState.RAIDING_INSIDE && candidate.nestId === colony.id
+      ));
+      if (intruders.length === 0) {
+        ant.state = AntState.IN_NEST;
+        ant.nestTask = NestTask.NONE;
+        ant.nestPath = null;
+        ant.nestPathIndex = 0;
+        ant.nestTargetChamberId = null;
+        return;
+      }
+      // déjà dans la même chambre qu'un intrus : reste sur place, le combat
+      // est résolu depuis le tick de l'intrus (resolveInteriorCombat), un
+      // seul point de résolution par échange.
+      if (intruders.some((intruder) => intruder.nestChamberId === ant.nestChamberId)) return;
+      // sinon converge vers la chambre menacée la plus proche dans le
+      // graphe — "convergence vers le corridor menacé", pas juste une
+      // résolution passive si le hasard les fait se croiser.
+      const threatenedChamberId = intruders[0].nestChamberId;
+      if (!ant.nestPath || ant.nestTargetChamberId !== threatenedChamberId) {
+        ant.nestTargetChamberId = threatenedChamberId;
+        ant.nestPath = interior.path(ant.nestChamberId ?? NestChamberType.ENTRANCE, threatenedChamberId);
+        ant.nestPathIndex = 0;
+      }
+      const waypointId = ant.nestPath[ant.nestPathIndex];
+      const speedMultiplier = this.nestCongestionMultiplier(interior, waypointId, colonyConfig);
+      const arrived = this.nestNavigationSystem.moveToward(
+        ant,
+        interior.getChamber(waypointId).position,
+        colonyConfig.nestInteriorSpeed * speedMultiplier,
+        deltaSeconds,
+        colonyConfig.nestChamberArrivalRadius,
+      );
+      if (!arrived) return;
+      if (ant.nestPathIndex < ant.nestPath.length - 1) {
+        ant.nestPathIndex += 1;
+        return;
+      }
+      interior.moveAntToChamber(ant, threatenedChamberId);
+      ant.nestPath = null;
+      ant.nestPathIndex = 0;
+      return;
+    }
+
     if (ant.nestTask === NestTask.TEND_BROOD && ant.nestChamberId === NestChamberType.BROOD) {
       this.tendBrood(ant, colony);
       return;
@@ -865,11 +963,12 @@ export class Simulation {
     }
 
     this.ensureNestRoute(ant, colony, interior);
-    const waypoint = ant.nestPath[ant.nestPathIndex];
+    const waypointId = ant.nestPath[ant.nestPathIndex];
+    const speedMultiplier = this.nestCongestionMultiplier(interior, waypointId, colonyConfig);
     const arrivedWaypoint = this.nestNavigationSystem.moveToward(
       ant,
-      waypoint,
-      colonyConfig.nestInteriorSpeed,
+      interior.getChamber(waypointId).position,
+      colonyConfig.nestInteriorSpeed * speedMultiplier,
       deltaSeconds,
       colonyConfig.nestChamberArrivalRadius,
     );
@@ -942,7 +1041,7 @@ export class Simulation {
     site.progress += 1;
     if (site.progress < site.requiredProgress) return;
 
-    const chamber = interior.addChamber(site.type, site.position, site.anchorId);
+    const chamber = interior.addChamber(site.type, site.position, site.anchorId, site.exitAngle);
     interior.pendingSites.delete(site.id);
     colony.consumeFood(Math.min(colonyConfig.nestBuildFoodCost, colony.foodStock));
     colony.chambersBuilt += 1;
@@ -998,14 +1097,24 @@ export class Simulation {
       ? interior.chambers.get(ant.nestTargetChamberId)?.type
       : null;
     if (ant.nestPath && currentTargetType === desiredType) return;
-    const candidates = interior.getChambersByType(desiredType);
-    const targetChamber = candidates.reduce((best, chamber) => (
-      chamber.occupants.size < best.occupants.size ? chamber : best
-    ), candidates[0]);
+    const targetChamber = interior.leastLoadedChamberOfType(desiredType);
     const fromId = ant.nestChamberId ?? NestChamberType.ENTRANCE;
     ant.nestTargetChamberId = targetChamber.id;
-    ant.nestPath = interior.path(fromId, targetChamber.id).map((id) => ({ ...interior.getChamber(id).position }));
+    ant.nestPath = interior.path(fromId, targetChamber.id);
     ant.nestPathIndex = 0;
+  }
+
+  // Ralentit une fourmi qui approche une chambre déjà à — ou au-dessus de —
+  // sa capacité (V1.5.4.2). Un seuil, pas une courbe progressive : en
+  // dessous de la capacité, vitesse normale ; au-dessus, un multiplicateur
+  // fixe. Volontairement simple — la vraie valeur ajoutée est de rendre une
+  // deuxième chambre du même type (construite dynamiquement) réellement
+  // utile, pas de modéliser une file d'attente réaliste.
+  nestCongestionMultiplier(interior, chamberId, colonyConfig) {
+    if (!colonyConfig.nestCongestionEnabled) return 1;
+    const chamber = interior.chambers.get(chamberId);
+    if (!chamber || chamber.occupants.size < colonyConfig.nestChamberCapacity) return 1;
+    return colonyConfig.nestCongestionSlowdown;
   }
 
   depositAtStorage(ant, colony) {
@@ -1065,10 +1174,200 @@ export class Simulation {
           targetColonyId: raid.targetColonyId,
         });
       }
+      const colonyConfig = this.colonyConfigs.get(colony.id);
+      const targetColony = this.colonies.find((candidate) => candidate.id === raid.targetColonyId);
+      const targetConfig = targetColony ? this.colonyConfigs.get(targetColony.id) : null;
+      if (colonyConfig.nestIntrusionEnabled && targetColony && targetConfig?.nestInteriorEnabled) {
+        this.breachNest(ant, colony, targetColony);
+        return;
+      }
       this.attemptPillage(ant, colony, raid);
       ant.state = AntState.RETURNING_HOME;
       ant.direction += Math.PI;
     }
+  }
+
+  // V1.5.4 : quand l'intrusion est activée des deux côtés (config du
+  // raider ET du nid visé), le raider entre PHYSIQUEMENT dans l'intérieur
+  // ennemi au lieu de piller à distance — il utilise le même graphe de
+  // chambres que les fourmis locales, peut y croiser des défenseurs, et son
+  // `ant.nestId` pointe vers la colonie ETRANGÈRE (jamais la sienne, voir
+  // l'invariant dédié dans Invariants.js).
+  breachNest(ant, colony, targetColony) {
+    const interior = this.nestInteriors.get(targetColony.id);
+    const entrance = interior.leastLoadedChamberOfType(NestChamberType.ENTRANCE);
+    interior.moveAntToChamber(ant, entrance.id);
+    ant.locationType = "NEST";
+    ant.nestId = targetColony.id;
+    ant.nestTask = NestTask.NONE;
+    ant.nestPath = null;
+    ant.nestPathIndex = 0;
+    ant.nestTargetChamberId = null;
+    ant.state = AntState.RAIDING_INSIDE;
+    targetColony.nestBreaches += 1;
+    this.emitEvent("NEST_BREACHED", {
+      colonyId: colony.id,
+      antId: ant.id,
+      targetColonyId: targetColony.id,
+      chamberId: entrance.id,
+    });
+  }
+
+  // Le raider à l'intérieur : combat s'il croise un défenseur dans sa
+  // chambre courante, sinon avance vers STORAGE (butin) puis vers une
+  // ENTRANCE (fuite) une fois chargé ou à court d'énergie — exactement la
+  // même logique de répartition de charge + chemin par corridors que les
+  // fourmis locales (`leastLoadedChamberOfType` + `interior.path`), pas de
+  // ligne droite à travers un nid qui n'est pas le sien.
+  updateRaidingInsideAnt(ant, colony, colonyConfig, deltaSeconds) {
+    const targetColony = this.colonies.find((candidate) => candidate.id === ant.nestId);
+    const interior = targetColony ? this.nestInteriors.get(ant.nestId) : null;
+    if (!targetColony || !interior) {
+      ant.locationType = "WORLD";
+      ant.nestId = null;
+      ant.nestChamberId = null;
+      ant.nestPosition = null;
+      ant.state = AntState.RETURNING_HOME;
+      ant.direction += Math.PI;
+      return;
+    }
+    ant.age += deltaSeconds;
+    if (this.config.combatEnabled && ant.combatCooldown > 0) ant.combatCooldown -= 1;
+
+    if (this.resolveInteriorCombat(ant, colony, targetColony, interior)) return;
+    if (ant.state === AntState.DEAD) return;
+
+    if (this.metabolism.consumeEnergy(
+      ant,
+      0,
+      deltaSeconds,
+      colonyConfig.carryingEnergyMultiplier,
+      this.basalRateFor(ant, colonyConfig),
+      1,
+      1,
+    )) {
+      this.handleDeath(ant, "STARVATION", colony);
+      return;
+    }
+
+    const fleeing = ant.raidCargo > 0 || this.metabolism.needsFood(ant);
+    const targetType = fleeing ? NestChamberType.ENTRANCE : NestChamberType.STORAGE;
+    const currentTargetType = ant.nestTargetChamberId
+      ? interior.chambers.get(ant.nestTargetChamberId)?.type
+      : null;
+    if (!ant.nestPath || currentTargetType !== targetType) {
+      const targetChamber = interior.leastLoadedChamberOfType(targetType);
+      ant.nestTargetChamberId = targetChamber.id;
+      ant.nestPath = interior.path(ant.nestChamberId ?? NestChamberType.ENTRANCE, targetChamber.id);
+      ant.nestPathIndex = 0;
+    }
+    const waypointId = ant.nestPath[ant.nestPathIndex];
+    const targetConfig = this.colonyConfigs.get(targetColony.id);
+    const speedMultiplier = this.nestCongestionMultiplier(interior, waypointId, targetConfig);
+    const arrived = this.nestNavigationSystem.moveToward(
+      ant,
+      interior.getChamber(waypointId).position,
+      colonyConfig.nestInteriorSpeed * speedMultiplier,
+      deltaSeconds,
+      colonyConfig.nestChamberArrivalRadius,
+    );
+    if (!arrived) return;
+    if (ant.nestPathIndex < ant.nestPath.length - 1) {
+      ant.nestPathIndex += 1;
+      return;
+    }
+
+    interior.moveAntToChamber(ant, ant.nestTargetChamberId);
+    ant.nestPath = null;
+    ant.nestPathIndex = 0;
+
+    if (targetType === NestChamberType.STORAGE) {
+      const raid = this.raids.get(ant.raidId);
+      if (raid) this.attemptPillage(ant, colony, raid);
+    } else if (targetType === NestChamberType.ENTRANCE) {
+      interior.removeAnt(ant);
+      ant.locationType = "WORLD";
+      ant.nestId = null;
+      ant.nestChamberId = null;
+      ant.nestPosition = null;
+      ant.state = AntState.RETURNING_HOME;
+      ant.direction += Math.PI;
+      this.emitEvent("RAIDER_EXITED_NEST", {
+        colonyId: colony.id,
+        antId: ant.id,
+        targetColonyId: targetColony.id,
+      });
+    }
+  }
+
+  nestDefensePriorityMultiplier(chamberId, interior, targetConfig) {
+    const type = interior.chambers.get(chamberId)?.type;
+    if (type === NestChamberType.QUEEN) return targetConfig.nestDefenseQueenMultiplier;
+    if (type === NestChamberType.BROOD) return targetConfig.nestDefenseBroodMultiplier;
+    return 1;
+  }
+
+  // Un seul point de résolution par combat intérieur (déclenché uniquement
+  // depuis le tick de l'intrus, jamais depuis celui du défenseur — voir
+  // updateNestAnt/DEFENDING_INSIDE) : échanges de coups mutuels et
+  // déterministes, réutilisant les mêmes réglages de dégâts que le combat
+  // extérieur (`combatDamageRandomMin/Max`), mais volontairement plus
+  // simple — pas de menace/fuite, juste un échange jusqu'à la mort ou le
+  // départ de l'un des deux. Retourne true si un combat a occupé le tick de
+  // l'intrus (donc pas de déplacement ce tick-là).
+  resolveInteriorCombat(intruder, attackerColony, targetColony, interior) {
+    const targetConfig = this.colonyConfigs.get(targetColony.id);
+    if (!this.config.combatEnabled || !targetConfig.nestIntrusionEnabled) return false;
+    const defender = targetColony.ants.find((candidate) => (
+      candidate.state !== AntState.DEAD
+      && candidate.caste === Caste.SOLDIER
+      && candidate.locationType === "NEST"
+      && candidate.nestId === targetColony.id
+      && candidate.nestChamberId === intruder.nestChamberId
+      && (candidate.state === AntState.IN_NEST || candidate.state === AntState.DEFENDING_INSIDE)
+    ));
+    if (!defender) return false;
+    defender.state = AntState.DEFENDING_INSIDE;
+    const priorityMultiplier = this.nestDefensePriorityMultiplier(intruder.nestChamberId, interior, targetConfig);
+    const damageRange = targetConfig.combatDamageRandomMax - targetConfig.combatDamageRandomMin;
+
+    if (defender.combatCooldown <= 0) {
+      const roll = targetConfig.combatDamageRandomMin + this.intrusionRandom() * damageRange;
+      intruder.health -= defender.attackPower * priorityMultiplier * roll;
+      defender.combatCooldown = targetConfig.combatAttackCooldownTicks;
+      this.emitEvent("NEST_INTERIOR_COMBAT", {
+        colonyId: targetColony.id,
+        defenderId: defender.id,
+        intruderColonyId: attackerColony.id,
+        intruderId: intruder.id,
+        chamberId: intruder.nestChamberId,
+      });
+      if (intruder.health <= 0) {
+        intruder.state = AntState.DEAD;
+        this.handleDeath(intruder, "COMBAT", attackerColony, {
+          killerColony: targetColony,
+          killerCaste: defender.caste,
+          killerIsDefending: true,
+          killerId: defender.id,
+        });
+        return true;
+      }
+    }
+    if (intruder.combatCooldown <= 0) {
+      const roll = targetConfig.combatDamageRandomMin + this.intrusionRandom() * damageRange;
+      defender.health -= intruder.attackPower * roll;
+      intruder.combatCooldown = targetConfig.combatAttackCooldownTicks;
+      if (defender.health <= 0) {
+        defender.state = AntState.DEAD;
+        this.handleDeath(defender, "COMBAT", targetColony, {
+          killerColony: attackerColony,
+          killerCaste: intruder.caste,
+          killerIsDefending: false,
+          killerId: intruder.id,
+        });
+      }
+    }
+    return true;
   }
 
   attemptPillage(ant, colony, raid) {
@@ -1731,6 +2030,9 @@ export class Simulation {
       broodFoodDelivered: colony.broodFoodDelivered,
       chambersBuilt: colony.chambersBuilt,
       pendingConstructionSites: this.nestInteriors.get(colony.id)?.pendingSites.size ?? 0,
+      antsRaidingInside: livingAnts.filter((ant) => ant.state === AntState.RAIDING_INSIDE).length,
+      antsDefendingInside: livingAnts.filter((ant) => ant.state === AntState.DEFENDING_INSIDE).length,
+      nestBreaches: colony.nestBreaches,
       foodPheromones,
       homePheromones,
       alarmPheromones,
