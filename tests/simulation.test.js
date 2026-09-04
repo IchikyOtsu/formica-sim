@@ -1820,3 +1820,79 @@ test("a combat death always clears the dying ant's food target", () => {
   assert.equal(antB.state, AntState.DEAD);
   assert.equal(antB.target, null);
 });
+
+test("soldier production lags a real threat spike and tapers off via demographic dilution once it fades", () => {
+  const config = casteConfig({
+    colonies: multiColonyConfig().colonies.map((colony) => ({ ...colony, initialFoodStock: 300 })),
+    environmentEnabled: false,
+    queenLayingCooldownTicks: 40,
+    eggDurationTicks: 30,
+    larvaDurationTicks: 40,
+    pupaDurationTicks: 30,
+    larvaFoodPerTick: 0.05,
+    foodSources: [
+      { id: "NEAR_A", x: 30, y: 50, quantity: 300, radius: 8 },
+      { id: "NEAR_B", x: 170, y: 50, quantity: 300, radius: 8 },
+    ],
+  });
+  const simulation = new Simulation(config);
+  const colonyA = simulation.colonies[0];
+  const colonyB = simulation.colonies[1];
+  const LEASH = 30;
+  const raiderIds = new Set(colonyB.ants.slice(0, Math.ceil(colonyB.ants.length * 0.3)).map((ant) => ant.id));
+  const leashTo = (ants, target) => {
+    for (const ant of ants) {
+      if (ant.state === AntState.DEAD) continue;
+      const dx = ant.position.x - target.x;
+      const dy = ant.position.y - target.y;
+      if (dx * dx + dy * dy > LEASH * LEASH) {
+        ant.position = { x: target.x + (Math.random() - 0.5) * 5, y: target.y + (Math.random() - 0.5) * 5 };
+      }
+    }
+  };
+  const PHASE_2_START = 500;
+  const PHASE_3_START = 2000;
+  const TOTAL_TICKS = 3000;
+
+  let soldiersAtPhase2Lag = null;
+  for (let tick = 0; tick < TOTAL_TICKS; tick += 1) {
+    const inPressure = tick >= PHASE_2_START && tick < PHASE_3_START;
+    const raiders = [];
+    const homeGuard = [];
+    for (const ant of colonyB.ants) (raiderIds.has(ant.id) ? raiders : homeGuard).push(ant);
+    leashTo(colonyA.ants, colonyA.nest.position);
+    leashTo(homeGuard, colonyB.nest.position);
+    leashTo(raiders, inPressure ? colonyA.nest.position : colonyB.nest.position);
+    simulation.tick();
+    if (tick === PHASE_2_START + 100) {
+      soldiersAtPhase2Lag = simulation.getColonyMetrics(colonyA).soldierCount;
+    }
+  }
+
+  assert.equal(soldiersAtPhase2Lag, 0, "soldiers should not appear immediately — the brood cycle imposes a lag");
+
+  const metricsAtPressureEnd = simulation.getColonyMetrics(colonyA);
+  assert.ok(metricsAtPressureEnd.soldierCount > 0, "sustained pressure should eventually produce soldiers");
+  const ratioAtPressureEnd = metricsAtPressureEnd.soldierCount / metricsAtPressureEnd.livingAnts;
+
+  for (let tick = PHASE_3_START; tick < PHASE_3_START + 1000; tick += 1) {
+    leashTo(colonyA.ants, colonyA.nest.position);
+    leashTo(colonyB.ants, colonyB.nest.position);
+    simulation.tick();
+  }
+
+  const metricsAfterCalm = simulation.getColonyMetrics(colonyA);
+  assert.ok(
+    metricsAfterCalm.soldierCount <= metricsAtPressureEnd.soldierCount,
+    "no new soldiers should be produced once threat pressure has faded",
+  );
+  assert.ok(
+    metricsAfterCalm.workerCount > metricsAtPressureEnd.workerCount,
+    "the colony keeps growing its worker base during the calm that follows",
+  );
+  const ratioAfterCalm = metricsAfterCalm.soldierCount / metricsAfterCalm.livingAnts;
+  assert.ok(
+    ratioAfterCalm < ratioAtPressureEnd,
+    "the soldier share should recede through demographic dilution, not just an explicit rule",
+  );
+});

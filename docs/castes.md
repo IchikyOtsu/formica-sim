@@ -81,7 +81,7 @@ aux morts par faim/environnement), violant l'invariant `dead-worker-inert` dès
 qu'une fourmi mourait au combat en poursuivant une source de nourriture.
 Corrigé dans `handleDeath`, couvre toutes les causes de mort.
 
-## Benchmark
+## Benchmark (10 seeds × 10 000 ticks, résultat final)
 
 ```bash
 npm run experiment -- castes --seeds=10 --ticks=10000
@@ -89,22 +89,63 @@ npm run experiment -- castes --seeds=10 --ticks=10000 --profile=adaptive
 ```
 
 Quatre profils pour la colonie A (posture défensive de base), tous testés
-contre le même agresseur figé (profil `Agressif` de Balanced Combat V1.2) :
+contre le même agresseur figé (profil `Agressif` de Balanced Combat V1.2).
+Le rythme de ponte par défaut (1 œuf/1500 ticks) ne laisse que ~6 naissances
+sur 10 000 ticks — bien trop peu pour que 4 politiques divergent — donc le
+script accélère `queenLayingCooldownTicks` à 300 pour ce benchmark.
 
-- **A — Workers only** (`castesEnabled: false`) : référence sans castes.
-- **B — 10-15% soldiers** : `threatPressureRatioScale` très bas (le ratio
-  cible sature quasi immédiatement à `casteSoldierRatioCap = 0.125`) —
-  proportion quasi fixe, pas une allocation réactive.
-- **C — Allocation adaptative** : `threatPressureRatioScale` réaliste
-  (150), plafond plus large (0.35) — la proportion suit la pression réelle.
-- **D — Surmilitarisation** : plafond haut (0.7), seuil de stock bas (5),
-  échelle de pression basse (5) — produit des soldats dès que possible,
-  sans discernement.
+| Profil | Soldats vivants | Coût militaire | Kills | Pertes totales | Stock final |
+|---|---|---|---|---|---|
+| A — Workers only (`castesEnabled: false`) | 0 | 0 | 3,7 | 22,8 | 432,6 |
+| C — Adaptatif (`threatPressureRatioScale: 150`, plafond 0,35) | 2,5 | 48,9 | 13,4 | 28,4 | 386,8 |
+| B — ~10-15% quasi fixe (`threatPressureRatioScale: 1`, plafond 0,125) | 4,5 | 85,9 | 17,7 | 33,1 | 364,5 |
+| D — Surmilitarisé (plafond 0,7, stock requis 5, échelle 5) | 9,4 | 119,1 | 23,4 | 33,4 | 330,6 |
 
-Résultat attendu (à confirmer par le run) : D protège mais ruine l'économie
-(`militaryFoodCost` élevé, `collected`/`foodStock` dégradés) ; C offre le
-meilleur compromis survie/économie ; A reste la meilleure économie mais la
-plus vulnérable. V1.3 sera considérée aboutie si une colonie peut finir avec
-peu de soldats en période calme et davantage sous pression, sans qu'aucune
-proportion ne soit codée en dur — ce que `decideCaste` garantit par
-construction (la seule constante fixe est le plafond, jamais la cible).
+Gradient net et monotone A→C→B→D sur soldats produits, coût militaire, kills
+et dégradation du stock — sans proportion codée en dur, seulement les
+paramètres de la règle économique.
+
+**Résultat non trivial** (non recherché à l'avance) : la surmilitarisation
+(D) ne réduit pas les pertes totales (33,4, pire que B et bien pire qu'A) —
+plus de soldats intensifie le combat des deux côtés sans mieux protéger la
+colonie. Son seul vrai bénéfice est offensif (kills, territoire), pas
+défensif. En efficacité militaire (kills / coût militaire), le classement
+s'inverse : C = 0,274, B = 0,206, D = 0,197 — l'allocation adaptative est la
+plus rentable des trois, pas la plus dépensière.
+
+## Dynamique temporelle : le décalage menace → soldats
+
+Un benchmark final ne montre que l'état stationnaire. La promesse de
+l'allocation adaptative est comportementale : peu de soldats au calme,
+davantage sous pression réelle, ralentissement quand elle retombe — sans
+règle du type « si tick > X alors soldats ». Vérifié avec
+`scripts/castes-timeline.js` : un scénario à trois phases (calme / pression
+soutenue / retour au calme) où une colonie B agressive est physiquement
+maintenue (« laisse ») loin du nid de A pendant le calme, puis contre son nid
+pendant la phase de pression — tout le reste (contacts, `threatPressure`,
+`decideCaste`, ponte, développement, émergence) reste le moteur normal.
+
+```text
+calme (0–500)         : threatPressure = 0, soldierCount = 0 en continu
+pression (500–2000)   : threatPressure explose (jusqu'à ~96), décroît par à-coups
+  → soldierCount reste à 0 jusqu'à ~tick 650 (décalage ≈ durée œuf+larve+nymphe)
+  → puis monte 0→9 entre les ticks 650 et 1000, où il se stabilise
+retour au calme (2000+): threatPressure retombe à 0, soldierCount plafonne à 9
+  (aucune nouvelle production) pendant que workerCount continue de croître
+  (85→108 sur 1000 ticks) — la part de soldats se dilue démographiquement
+```
+
+Le décalage observé (~150 ticks avec `eggDurationTicks:30,
+larvaDurationTicks:40, pupaDurationTicks:30`) correspond à l'ordre de
+grandeur du cycle de couvain, pas à un artefact de seuillage. Testé en
+version compressée et déterministe dans la suite (`soldier production lags a
+real threat spike and tapers off via demographic dilution once it fades`) :
+0 soldat pendant tout le calme, 0 soldat encore 100 ticks après le début de
+la pression (décalage), puis apparition, puis plafond et dilution
+(`soldierRatio` strictement décroissant) pendant le retour au calme.
+
+V1.3 est considérée aboutie : la colonie finit avec peu de soldats en
+période calme et davantage sous pression, la production ralentit puis
+s'arrête quand la pression retombe, et la part d'ouvrières remonte par
+renouvellement démographique — le tout sans qu'aucune proportion ni aucune
+condition sur le numéro de tick ne soit codée en dur dans le moteur.
