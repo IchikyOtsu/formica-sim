@@ -11,6 +11,7 @@ import { ReturnHomeBehavior } from "../src/behaviors/ReturnHomeBehavior.js";
 import { Ant, AntState, Caste } from "../src/entities/Ant.js";
 import { RaidState } from "../src/entities/Raid.js";
 import { RaidDecisionSystem } from "../src/systems/RaidDecisionSystem.js";
+import { TacticalOverlaySystem, OverlayType } from "../src/systems/TacticalOverlaySystem.js";
 import { Brood, BroodStage } from "../src/entities/Brood.js";
 import { FoodSource, FoodSourceState } from "../src/entities/FoodSource.js";
 import { DangerZone } from "../src/environment/DangerZone.js";
@@ -19,6 +20,7 @@ import { ExperimentRunner } from "../src/experiments/ExperimentRunner.js";
 import { SCENARIO_PRESETS, configForPreset } from "../src/experiments/ScenarioPresets.js";
 import { PheromoneField, PheromoneType } from "../src/simulation/PheromoneField.js";
 import { Renderer } from "../src/rendering/Renderer.js";
+import { MapMarkerRenderer } from "../src/rendering/MapMarkerRenderer.js";
 import { Simulation } from "../src/simulation/Simulation.js";
 import { DEFAULT_CONFIG } from "../src/simulation/SimulationConfig.js";
 import {
@@ -2642,4 +2644,87 @@ test("auto-raid replay is exact for an identical seed and configuration", () => 
   assert.deepEqual(first.raidTicks, second.raidTicks);
   assert.equal(first.colonyA.foodStolen, second.colonyA.foodStolen);
   assert.equal(first.colonyA.raidsCompleted, second.colonyA.raidsCompleted);
+});
+
+test("TacticalOverlaySystem produces no overlay on a plain scenario with no raid activity", () => {
+  const simulation = new Simulation(multiColonyConfig());
+  const overlays = new TacticalOverlaySystem().collect(simulation);
+  assert.deepEqual(overlays, []);
+});
+
+test("TacticalOverlaySystem exposes a known enemy nest as soon as it is discovered", () => {
+  const simulation = new Simulation(pillageConfig());
+  const colonyA = simulation.colonies[0];
+  const colonyB = simulation.colonies[1];
+  colonyA.knownEnemyNests.set("B", {
+    position: { ...colonyB.nest.position },
+    discoveredTick: 5,
+    lastSeenTick: 5,
+  });
+
+  const overlays = new TacticalOverlaySystem().collect(simulation);
+  const nestMarker = overlays.find((overlay) => overlay.type === OverlayType.ENEMY_NEST_KNOWN);
+  assert.ok(nestMarker);
+  assert.equal(nestMarker.colonyId, "A");
+  assert.deepEqual({ x: nestMarker.x, y: nestMarker.y }, colonyB.nest.position);
+});
+
+test("TacticalOverlaySystem draws a raid route only once the target nest is actually known", () => {
+  const simulation = new Simulation(pillageConfig());
+  const colonyA = simulation.colonies[0];
+  const soldier = pushSoldier(colonyA, "A-SOLDIER-1");
+  const raid = setupRaid(simulation);
+
+  let overlays = new TacticalOverlaySystem().collect(simulation);
+  assert.ok(overlays.some((overlay) => overlay.type === OverlayType.RAID_ROUTE));
+  const route = overlays.find((overlay) => overlay.type === OverlayType.RAID_ROUTE);
+  assert.deepEqual({ x: route.x, y: route.y }, colonyA.nest.position);
+  assert.equal(route.targetX, colonyA.knownEnemyNests.get("B").position.x);
+
+  const group = overlays.find((overlay) => overlay.type === OverlayType.RAID_GROUP);
+  assert.ok(group);
+  assert.deepEqual({ x: group.x, y: group.y }, soldier.position);
+
+  // once the raid resolves, no more route/group overlay for it
+  colonyA.knownEnemyNests.delete("B");
+  simulation.raids.delete(raid.id);
+  soldier.raidId = null;
+  overlays = new TacticalOverlaySystem().collect(simulation);
+  assert.equal(overlays.some((overlay) => overlay.type === OverlayType.RAID_ROUTE), false);
+});
+
+test("TacticalOverlaySystem flags any ant currently carrying raid loot", () => {
+  const simulation = new Simulation(pillageConfig());
+  const colonyA = simulation.colonies[0];
+  const soldier = pushSoldier(colonyA, "A-SOLDIER-1");
+  soldier.raidCargo = 8;
+
+  const overlays = new TacticalOverlaySystem().collect(simulation);
+  const lootMarker = overlays.find((overlay) => overlay.type === OverlayType.LOOT_CARRIED);
+  assert.ok(lootMarker);
+  assert.equal(lootMarker.payload.amount, 8);
+  assert.deepEqual({ x: lootMarker.x, y: lootMarker.y }, soldier.position);
+});
+
+test("MapMarkerRenderer draws every overlay type without throwing, given only a bare 2D-context surface", () => {
+  const simulation = new Simulation(pillageConfig());
+  const colonyA = simulation.colonies[0];
+  const soldier = pushSoldier(colonyA, "A-SOLDIER-1");
+  soldier.raidCargo = 5;
+  setupRaid(simulation);
+
+  const overlays = new TacticalOverlaySystem().collect(simulation);
+  assert.ok(overlays.length >= 3, "route, group and loot should all be present in this setup");
+
+  const noop = () => {};
+  const ctx = new Proxy({}, { get: () => noop });
+  const colonyColors = new Map(simulation.colonies.map((colony) => [colony.id, colony.color]));
+  assert.doesNotThrow(() => new MapMarkerRenderer().render(ctx, overlays, colonyColors));
+});
+
+test("the renderer exposes a tactical overlay toggle independent from pheromone/territory modes", () => {
+  const renderer = new Renderer({ getContext: () => ({}) });
+  assert.equal(renderer.tacticalOverlaysEnabled, true, "on by default");
+  renderer.setTacticalOverlaysEnabled(false);
+  assert.equal(renderer.tacticalOverlaysEnabled, false);
 });

@@ -345,6 +345,10 @@ document.querySelector("#territory-layer").addEventListener("change", (event) =>
   renderer.setTerritoryMode(event.target.value);
 });
 
+document.querySelector("#tactical-overlays-toggle").addEventListener("change", (event) => {
+  renderer.setTacticalOverlaysEnabled(event.target.checked);
+});
+
 // Un preset comme "Combat équilibré V1.2" fixe des seuils de combat/castes
 // différents par colonie ; ces clés priment sur la config globale. Le
 // formulaire ne propose que des réglages symétriques, donc on les retire des

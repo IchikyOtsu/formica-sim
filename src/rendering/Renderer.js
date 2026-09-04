@@ -2,6 +2,8 @@ import { PheromoneType } from "../simulation/PheromoneField.js";
 import { AntState, Caste } from "../entities/Ant.js";
 import { BroodStage } from "../entities/Brood.js";
 import { TerritoryState } from "../simulation/TerritoryMap.js";
+import { TacticalOverlaySystem } from "../systems/TacticalOverlaySystem.js";
+import { MapMarkerRenderer } from "./MapMarkerRenderer.js";
 
 function colorToRgb(color) {
   const match = /^#([0-9a-f]{6})$/i.exec(color);
@@ -16,10 +18,17 @@ export class Renderer {
     this.context = canvas.getContext("2d");
     this.pheromoneMode = "BOTH";
     this.territoryMode = "COLONIES";
+    this.tacticalOverlaysEnabled = true;
+    this.tacticalOverlaySystem = new TacticalOverlaySystem();
+    this.mapMarkerRenderer = new MapMarkerRenderer();
   }
 
   setPheromonesVisible(visible) {
     this.pheromoneMode = visible ? "BOTH" : "OFF";
+  }
+
+  setTacticalOverlaysEnabled(visible) {
+    this.tacticalOverlaysEnabled = visible;
   }
 
   setPheromoneMode(mode) {
@@ -74,6 +83,11 @@ export class Renderer {
       this.drawNest(ctx, colony.nest, colony.color);
       this.drawQueenAndBrood(ctx, colony);
       for (const ant of colony.ants) this.drawAnt(ctx, ant, colony.color);
+    }
+    if (this.tacticalOverlaysEnabled) {
+      const colonyColors = new Map(colonies.map((colony) => [colony.id, colony.color]));
+      const overlays = this.tacticalOverlaySystem.collect(simulation);
+      this.mapMarkerRenderer.render(ctx, overlays, colonyColors);
     }
   }
 
