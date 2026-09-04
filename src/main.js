@@ -10,8 +10,8 @@ import { Renderer } from "./rendering/Renderer.js";
 import { Simulation } from "./simulation/Simulation.js";
 import { DEFAULT_CONFIG } from "./simulation/SimulationConfig.js";
 
-const simulation = new Simulation();
-const APP_VERSION = "1.0.0";
+const simulation = new Simulation(configForPreset("symmetric-competition"));
+const APP_VERSION = "1.1.0";
 const renderer = new Renderer(document.querySelector("#world"));
 const playPause = document.querySelector("#play-pause");
 const buttonText = playPause.querySelector(".button-text");
@@ -92,6 +92,7 @@ const elements = {
   pausePopulation: document.querySelector("#pause-population"),
   pauseStock: document.querySelector("#pause-stock"),
   pauseReason: document.querySelector("#pause-reason"),
+  colonyComparison: document.querySelector("#colony-comparison"),
 };
 
 const charts = [...document.querySelectorAll(".chart")].map((canvas) => (
@@ -193,6 +194,37 @@ function updateMetrics() {
     ? "—"
     : `${metrics.completionTick} ticks`;
   elements.time.textContent = formatTime(metrics.elapsedMs);
+  renderColonyMetrics(metrics.colonies);
+}
+
+function renderColonyMetrics(colonies) {
+  const cards = colonies.map((colony) => {
+    const card = document.createElement("article");
+    card.className = "colony-card";
+    card.style.setProperty("--colony-color", colony.color);
+    const title = document.createElement("h3");
+    title.textContent = colony.name;
+    const list = document.createElement("dl");
+    const rows = [
+      ["Population", colony.totalPopulation],
+      ["Stock", colony.foodStock.toFixed(1)],
+      ["Collecte", colony.resources.toFixed(0)],
+      ["Part ressources", `${(colony.resourceShare * 100).toFixed(1)} %`],
+      ["Territoire", `${colony.territoryCells} cellules`],
+      ["Contacts", colony.foreignContacts],
+      ["Distance au nid", colony.averageNestDistance.toFixed(1)],
+    ];
+    for (const [label, value] of rows) {
+      const term = document.createElement("dt");
+      term.textContent = label;
+      const detail = document.createElement("dd");
+      detail.textContent = value;
+      list.append(term, detail);
+    }
+    card.append(title, list);
+    return card;
+  });
+  elements.colonyComparison.replaceChildren(...cards);
 }
 
 function describeEvent(event) {
@@ -296,11 +328,20 @@ document.querySelector("#pheromone-layer").addEventListener("change", (event) =>
   renderer.setPheromoneMode(event.target.value);
 });
 
+document.querySelector("#territory-layer").addEventListener("change", (event) => {
+  renderer.setTerritoryMode(event.target.value);
+});
+
 document.querySelector("#parameters-form").addEventListener("submit", (event) => {
   event.preventDefault();
   simulation.reconfigure({
     ...simulation.config,
     initialAnts: Number(document.querySelector("#param-ants").value),
+    colonies: simulation.config.colonies?.map((colony) => ({
+      ...colony,
+      initialAnts: Number(document.querySelector("#param-ants").value),
+      initialFoodStock: Number(document.querySelector("#param-initial-stock").value),
+    })) ?? null,
     pheromoneEvaporationRate: Number(document.querySelector("#param-evaporation").value),
     pheromoneDiffusionRate: Number(document.querySelector("#param-diffusion").value),
     foodDepositStrength: Number(document.querySelector("#param-food-deposit").value),
@@ -394,7 +435,7 @@ for (const preset of SCENARIO_PRESETS) {
   option.title = preset.description;
   elements.preset.append(option);
 }
-elements.preset.value = "reference-v1";
+elements.preset.value = "symmetric-competition";
 
 document.querySelector("#apply-preset").addEventListener("click", () => {
   loadConfiguration(configForPreset(elements.preset.value));

@@ -9,6 +9,6 @@ Elle n'a ni carte globale, ni chemin préprogrammé, ni connaissance géométriq
 des dangers. Le monde discret en ticks contient un nid, des sources, des zones
 dangereuses, une reine et du couvain.
 
-Simplifications volontaires : ouvrières identiques, une seule colonie, reine
-immobile, pas de génétique, combat, transport multiple ou topographie. Les
+Simplifications volontaires : ouvrières identiques, reines immobiles, aucune
+interaction agressive entre colonies, pas de génétique, transport multiple ou topographie. Les
 probabilités et coûts sont des paramètres de modèle, pas des mesures biologiques.

@@ -22,3 +22,8 @@ const snapshot = simulation.getState();
 
 `getState()` retourne un instantané sérialisable et indépendant des objets
 internes. `src/index.js` est le point d'entrée stable du moteur V1.
+
+Depuis V1.1, `Simulation.colonies` est la source de vérité. `colony` reste un
+alias vers la première colonie pour la compatibilité V1.0. De même,
+`colonyPheromones` indexe les champs par identifiant tandis que `pheromoneField`
+désigne le champ de la première colonie.

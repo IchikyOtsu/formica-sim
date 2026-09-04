@@ -4,11 +4,11 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#171b13" />
-    <title>Formica Sim 1.0 — Laboratoire de colonie</title>
+    <title>Formica Sim 1.1 — Territorialité</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="./src/styles.css?v=1.0.0" />
+    <link rel="stylesheet" href="./src/styles.css?v=1.1.0" />
   </head>
   <body>
     <main class="app-shell">
@@ -19,7 +19,7 @@
           </span>
           <div>
             <p class="eyebrow">Laboratoire de terrain</p>
-            <h1>FORMICA <span>/ SIM V1.0</span></h1>
+            <h1>FORMICA <span>/ SIM V1.1</span></h1>
           </div>
         </div>
         <div class="status-pill" id="runtime-status" role="status">
@@ -170,6 +170,14 @@
                 <option value="OFF">Masquées</option>
               </select>
             </label>
+            <label class="layer-control">Territoires
+              <select id="territory-layer" aria-label="Carte territoriale visible">
+                <option value="COLONIES">Colonies</option>
+                <option value="INFLUENCE">Influence</option>
+                <option value="CONTESTED">Contestées</option>
+                <option value="OFF">Masqués</option>
+              </select>
+            </label>
             <div class="speed-control">
               <span>Vitesse</span>
               <button class="speed active" data-speed="1" type="button">×1</button>
@@ -233,6 +241,7 @@
               <article><h3>Énergie moyenne</h3><canvas class="chart" data-series="averageEnergy"></canvas></article>
               <article><h3>Mortalité cumulée</h3><canvas class="chart" data-series="deaths"></canvas></article>
             </div>
+            <div id="colony-comparison" class="colony-comparison" aria-label="Métriques par colonie"></div>
             <div class="analysis-footer">
               <div class="replay-control">
                 <label>Tick du replay<input id="replay-tick" type="number" min="0" step="100" value="10000" /></label>
@@ -263,6 +272,6 @@
         </section>
       </section>
     </main>
-    <script type="module" src="./src/main.js?v=1.0.0"></script>
+    <script type="module" src="./src/main.js?v=1.1.0"></script>
   </body>
 </html>

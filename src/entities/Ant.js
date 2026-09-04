@@ -44,5 +44,7 @@ export class Ant {
     this.returnReason = null;
     this.returnDistance = 0;
     this.directReturnDistance = 0;
+    this.nearbyForeignAnts = [];
+    this.lastDiscoveredSourceId = null;
   }
 }

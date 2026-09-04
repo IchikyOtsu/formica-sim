@@ -1,12 +1,21 @@
 import { PheromoneType } from "../simulation/PheromoneField.js";
 import { AntState } from "../entities/Ant.js";
 import { BroodStage } from "../entities/Brood.js";
+import { TerritoryState } from "../simulation/TerritoryMap.js";
+
+function colorToRgb(color) {
+  const match = /^#([0-9a-f]{6})$/i.exec(color);
+  if (!match) return [240, 180, 95];
+  const value = Number.parseInt(match[1], 16);
+  return [(value >> 16) & 255, (value >> 8) & 255, value & 255];
+}
 
 export class Renderer {
   constructor(canvas) {
     this.canvas = canvas;
     this.context = canvas.getContext("2d");
     this.pheromoneMode = "BOTH";
+    this.territoryMode = "COLONIES";
   }
 
   setPheromonesVisible(visible) {
@@ -18,6 +27,13 @@ export class Renderer {
       throw new Error(`Unknown pheromone display mode: ${mode}`);
     }
     this.pheromoneMode = mode;
+  }
+
+  setTerritoryMode(mode) {
+    if (!["COLONIES", "INFLUENCE", "CONTESTED", "OFF"].includes(mode)) {
+      throw new Error(`Unknown territory display mode: ${mode}`);
+    }
+    this.territoryMode = mode;
   }
 
   resize() {
@@ -34,22 +50,31 @@ export class Renderer {
   render(simulation) {
     this.resize();
     const ctx = this.context;
-    const { world, colony, foodSources, dangerZones } = simulation;
+    const { world, colonies, foodSources, dangerZones } = simulation;
     const scaleX = this.canvas.width / world.width;
     const scaleY = this.canvas.height / world.height;
 
     ctx.setTransform(scaleX, 0, 0, scaleY, 0, 0);
     ctx.clearRect(0, 0, world.width, world.height);
     this.drawGrid(ctx, world);
+    if (this.territoryMode !== "OFF") {
+      this.drawTerritories(ctx, simulation.territoryMap, colonies, this.territoryMode);
+    }
     for (const zone of dangerZones) this.drawDangerZone(ctx, zone);
-    if (this.pheromoneMode !== "OFF") this.drawPheromones(ctx, simulation.pheromoneField);
+    if (this.pheromoneMode !== "OFF") {
+      for (const colony of colonies) {
+        this.drawPheromones(ctx, simulation.colonyPheromones.get(colony.id), colony.color);
+      }
+    }
 
     for (const source of foodSources) {
       if (source.active) this.drawFood(ctx, source);
     }
-    this.drawNest(ctx, colony.nest);
-    this.drawQueenAndBrood(ctx, colony);
-    for (const ant of colony.ants) this.drawAnt(ctx, ant);
+    for (const colony of colonies) {
+      this.drawNest(ctx, colony.nest, colony.color);
+      this.drawQueenAndBrood(ctx, colony);
+      for (const ant of colony.ants) this.drawAnt(ctx, ant, colony.color);
+    }
   }
 
   drawGrid(ctx, world) {
@@ -67,17 +92,53 @@ export class Renderer {
     ctx.strokeRect(0.5, 0.5, world.width - 1, world.height - 1);
   }
 
-  drawPheromones(ctx, field) {
+  drawPheromones(ctx, field, colonyColor = "#f0b45f") {
+    const colonyRgb = colorToRgb(colonyColor);
     ctx.save();
     ctx.globalCompositeOperation = "screen";
     if (this.pheromoneMode === "BOTH" || this.pheromoneMode === "HOME") {
-      this.drawPheromoneLayer(ctx, field, PheromoneType.HOME, [92, 151, 211]);
+      this.drawPheromoneLayer(ctx, field, PheromoneType.HOME, colonyRgb);
     }
     if (this.pheromoneMode === "BOTH" || this.pheromoneMode === "FOOD") {
-      this.drawPheromoneLayer(ctx, field, PheromoneType.FOOD, [137, 201, 102]);
+      this.drawPheromoneLayer(ctx, field, PheromoneType.FOOD, colonyRgb);
     }
     if (this.pheromoneMode === "BOTH" || this.pheromoneMode === "ALARM") {
       this.drawPheromoneLayer(ctx, field, PheromoneType.ALARM, [234, 76, 132]);
+    }
+    ctx.restore();
+  }
+
+  drawTerritories(ctx, territory, colonies, mode) {
+    const colors = new Map(colonies.map((colony) => [colony.id, colorToRgb(colony.color)]));
+    ctx.save();
+    for (let index = 0; index < territory.cells.length; index += 1) {
+      const owner = territory.cells[index];
+      const column = index % territory.columns;
+      const row = Math.floor(index / territory.columns);
+      let color = null;
+      let alpha = 0;
+      if (owner === TerritoryState.CONTESTED) {
+        if (mode === "COLONIES" || mode === "CONTESTED") {
+          color = [224, 102, 190];
+          alpha = 0.24;
+        }
+      } else if (owner !== TerritoryState.NEUTRAL && mode !== "CONTESTED") {
+        color = colors.get(owner);
+        if (mode === "INFLUENCE") {
+          const influence = territory.influences.get(owner)?.[index] ?? 0;
+          alpha = Math.min(0.28, Math.sqrt(influence / 80) * 0.3);
+        } else {
+          alpha = 0.12;
+        }
+      }
+      if (!color || alpha <= 0) continue;
+      ctx.fillStyle = `rgba(${color.join(", ")}, ${alpha})`;
+      ctx.fillRect(
+        column * territory.cellSize,
+        row * territory.cellSize,
+        territory.cellSize,
+        territory.cellSize,
+      );
     }
     ctx.restore();
   }
@@ -115,10 +176,10 @@ export class Renderer {
     }
   }
 
-  drawNest(ctx, nest) {
+  drawNest(ctx, nest, color = "#f0b45f") {
     const { x, y } = nest.position;
     const gradient = ctx.createRadialGradient(x - 7, y - 8, 3, x, y, nest.radius);
-    gradient.addColorStop(0, "#9d7048");
+    gradient.addColorStop(0, color);
     gradient.addColorStop(1, "#4e3526");
     ctx.fillStyle = gradient;
     ctx.beginPath(); ctx.arc(x, y, nest.radius, 0, Math.PI * 2); ctx.fill();
@@ -166,17 +227,17 @@ export class Renderer {
 
     ctx.save();
     ctx.translate(x, y);
-    ctx.fillStyle = "#f1c36f";
+    ctx.fillStyle = colony.color;
     ctx.beginPath(); ctx.ellipse(0, 0, 7, 4, -0.2, 0, Math.PI * 2); ctx.fill();
     ctx.fillStyle = "#3a281b";
     ctx.beginPath(); ctx.arc(5, -1, 2.5, 0, Math.PI * 2); ctx.fill();
-    ctx.strokeStyle = "#f1c36f";
+    ctx.strokeStyle = colony.color;
     ctx.lineWidth = 1;
     ctx.beginPath(); ctx.moveTo(-3, -5); ctx.lineTo(-1, -8); ctx.lineTo(1, -5); ctx.lineTo(3, -8); ctx.lineTo(5, -5); ctx.stroke();
     ctx.restore();
   }
 
-  drawAnt(ctx, ant) {
+  drawAnt(ctx, ant, colonyColor = "#f0b45f") {
     ctx.save();
     ctx.translate(ant.position.x, ant.position.y);
     if (ant.state === AntState.DEAD) {
@@ -188,7 +249,8 @@ export class Renderer {
       return;
     }
     ctx.rotate(ant.direction);
-    ctx.strokeStyle = "rgba(240, 180, 95, 0.66)";
+    const colonyRgb = colorToRgb(colonyColor);
+    ctx.strokeStyle = `rgba(${colonyRgb.join(", ")}, 0.66)`;
     ctx.lineWidth = 0.8;
     for (const side of [-1, 1]) {
       ctx.beginPath(); ctx.moveTo(-1, side); ctx.lineTo(-5, side * 4); ctx.stroke();
@@ -200,7 +262,7 @@ export class Renderer {
     }
     ctx.fillStyle = ant.state === AntState.RESTING
       ? "#79a8c8"
-      : ant.carryingFood ? "#d8cb78" : "#f0b45f";
+      : ant.carryingFood ? "#d8cb78" : colonyColor;
     ctx.beginPath(); ctx.ellipse(-2.5, 0, 3, 2.2, 0, 0, Math.PI * 2); ctx.fill();
     ctx.beginPath(); ctx.arc(2.5, 0, 1.9, 0, Math.PI * 2); ctx.fill();
     if (ant.carryingFood) {

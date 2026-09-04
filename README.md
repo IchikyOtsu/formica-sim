@@ -1,9 +1,9 @@
 # Formica Sim
 
 Un petit laboratoire visuel pour observer une colonie de fourmis dans un monde
-2D. La V1.0 stabilise le moteur expérimental : API publique sans Canvas, schéma
-de configuration versionné, invariants, scénario de référence à 50 000 ticks,
-replay déterministe, documentation scientifique et pause sur événement.
+2D. La V1.1 ajoute plusieurs colonies indépendantes, des ressources partagées,
+des phéromones privées, une carte de territorialité et des contacts étrangers,
+sans introduire de combat. Le moteur conserve l'API et les garanties V1.0.
 
 ## Lancer le projet
 
@@ -21,11 +21,17 @@ Puis ouvrir <http://localhost:4173>.
 npm test
 ```
 
-Validation V1.0 complète et scénario officiel :
+Validation V1.1 complète et scénario officiel V1.0 :
 
 ```bash
 npm run validate
 npm run validate:reference
+```
+
+Benchmark de compétition et d'équité entre colonies :
+
+```bash
+npm run experiment -- competition --seeds=100 --ticks=50000
 ```
 
 ## API moteur V1
@@ -54,6 +60,7 @@ utilisent `schemaVersion: 1` et les sections `simulation`, `ants`, `metabolism`,
 - [Déterminisme et invariants](docs/determinism.md)
 - [Expériences](docs/experiments.md)
 - [Replay et inspection](docs/replay.md)
+- [Multi-colonies et territorialité](docs/territoriality.md)
 
 Comparer danger sans alarme, puis alarme faible, équilibrée et forte :
 
@@ -105,12 +112,14 @@ src/
 ├── experiments/{ScenarioPresets,ExperimentRunner,AggregateStatistics}.js
 ├── rendering/Renderer.js
 ├── simulation/{Simulation,SimulationConfig,World,PheromoneField}.js
+├── simulation/{ColonyPheromoneFields,TerritoryMap,Invariants}.js
 ├── systems/{MovementSystem,FoodDetectionSystem,FoodCollectionSystem}.js
 ├── systems/{PheromoneDepositSystem,PheromoneSensingSystem,HomeDetectionSystem}.js
 ├── systems/MetabolismSystem.js
 ├── systems/{BroodSystem,FoodRegenerationSystem}.js
 ├── systems/{EnvironmentSystem,FoodSpawnSystem,HazardSystem}.js
 ├── systems/{AlarmDepositSystem,DirectionScoringSystem}.js
+├── systems/ForeignAntDetectionSystem.js
 ├── main.js
 ├── index.js
 └── styles.css
@@ -368,3 +377,16 @@ retrouve exactement la colonie et les champs de phéromones de référence.
 Enfin, `ExperimentRunner` fournit à chaque benchmark la même boucle multi-ticks,
 le même échantillonnage, un `RunSummary` et un journal. `AggregateStatistics`
 centralise moyenne, médiane, extrema et écart-type pour les comparaisons de seeds.
+
+## Multi-colonies et territorialité V1.1
+
+L'interface démarre avec deux colonies de 50 ouvrières dans des nids opposés.
+Elles partagent les sources et les dangers, mais conservent chacune reine,
+stock, couvain et couches `HOME`, `FOOD`, `ALARM`. Une ouvrière ne lit et ne
+modifie que le champ indexé par son `colonyId`.
+
+La carte **Territoires** affiche le contrôle par colonie, l'intensité ou les
+cellules contestées. Elle est purement descriptive et ne sert jamais à la
+navigation. Les contacts à courte portée produisent `FOREIGN_CONTACT` et des
+métriques, sans fuite, intimidation ni combat. L'ordre des colonies alterne à
+chaque tick afin que les prélèvements atomiques ne favorisent pas toujours A.

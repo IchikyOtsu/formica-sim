@@ -5,6 +5,7 @@ const scripts = {
   demography: "./demography-benchmark.js",
   survival: "./ecology-benchmark.js",
   pheromones: "./benchmark.js",
+  competition: "./competition-benchmark.js",
 };
 
 if (!scripts[experiment]) {

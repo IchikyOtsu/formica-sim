@@ -15,6 +15,22 @@ export function createRunSummary(simulation) {
     dangerDistance: metrics.dangerDistance,
     averageEnergy: metrics.averageEnergy,
     seasonCyclesCompleted: metrics.seasonCyclesCompleted,
+    colonyCount: metrics.colonyCount,
+    foreignContacts: metrics.foreignContacts,
+    contestedArea: metrics.contestedArea,
+    colonies: metrics.colonies.map((colony) => ({
+      id: colony.id,
+      population: colony.totalPopulation,
+      livingAnts: colony.livingAnts,
+      foodStock: colony.foodStock,
+      foodCollected: colony.resources,
+      resourceShare: colony.resourceShare,
+      births: colony.births,
+      deaths: colony.deaths,
+      territoryCells: colony.territoryCells,
+      foreignContacts: colony.foreignContacts,
+      averageNestDistance: colony.averageNestDistance,
+    })),
     extinct: metrics.livingAnts === 0 && metrics.broodSize === 0,
   };
 }

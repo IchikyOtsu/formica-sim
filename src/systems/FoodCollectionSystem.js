@@ -24,6 +24,7 @@ export class FoodCollectionSystem {
 
   deposit(ant, colony) {
     if (!ant.carryingFood) return false;
+    if (ant.colonyId !== colony.id) return false;
     if (distance(ant.position, colony.nest.position) > colony.nest.radius) return false;
 
     colony.depositFood(ant.carryingFoodAmount);

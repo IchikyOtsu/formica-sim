@@ -4,6 +4,7 @@ import { MetricsRecorder } from "../src/observability/MetricsRecorder.js";
 import { ReplayController } from "../src/observability/ReplayController.js";
 import { compareReference, referenceConfig, REFERENCE_SCENARIO } from "../src/experiments/ReferenceScenario.js";
 import { ExperimentRunner } from "../src/experiments/ExperimentRunner.js";
+import { configForPreset } from "../src/experiments/ScenarioPresets.js";
 import { assertSimulationInvariants } from "../src/simulation/Invariants.js";
 import { PheromoneType } from "../src/simulation/PheromoneField.js";
 import { Simulation } from "../src/simulation/Simulation.js";
@@ -65,13 +66,14 @@ const experimentProfiles = {
   Demography: { reproductionEnabled: true, initialFoodStock: 100, reproductionFoodThreshold: 10 },
   Environment: { environmentEnabled: true, seasonDurationTicks: 100 },
   Alarm: { alarmPheromonesEnabled: true, alarmInfluence: 1.2 },
+  Competition: configForPreset("symmetric-competition"),
 };
 const experimentResults = Object.entries(experimentProfiles).map(([name, overrides]) => {
   const result = runner.run({ config: { ...DEFAULT_CONFIG, ...overrides }, ticks: 500 });
   return { name, pass: result.metrics.tick === 500 && assertSimulationInvariants(result.simulation).valid };
 });
 
-console.log("\nFORMICA SIM 1.0 VALIDATION\n");
+console.log("\nFORMICA SIM 1.1 VALIDATION\n");
 console.log(`Tests                  ${tests.status === 0 ? "PASS" : "FAIL"}`);
 for (const result of results) {
   console.log(`${result.name.padEnd(23)}${result.pass ? "PASS" : "FAIL"}${result.details ? `  ${result.details}` : ""}`);

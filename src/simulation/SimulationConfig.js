@@ -3,6 +3,7 @@ export const DEFAULT_CONFIG = Object.freeze({
   height: 520,
   tickDurationMs: 100,
   initialAnts: 50,
+  colonies: null,
   antSpeed: 14,
   antEnergy: 100,
   antMaxEnergy: 100,
@@ -74,6 +75,10 @@ export const DEFAULT_CONFIG = Object.freeze({
   pheromoneRevisitPenalty: 0.12,
   recentCellMemory: 8,
   explorationStrength: 1.15,
+  foreignDetectionRadius: 14,
+  territoryMinimumInfluence: 0.08,
+  territoryContestThreshold: 0.4,
+  territoryUpdateInterval: 10,
   nest: { x: 135, y: 365, radius: 28 },
   foodSources: [
     { x: 625, y: 125, quantity: 100, radius: 20 },

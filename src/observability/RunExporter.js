@@ -2,7 +2,9 @@ import { createRunSummary } from "./RunSummary.js";
 import { toVersionedConfig } from "../config/ConfigSchema.js";
 
 function csvCell(value) {
-  const text = String(value ?? "");
+  const text = typeof value === "object" && value !== null
+    ? JSON.stringify(value)
+    : String(value ?? "");
   return /[",\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
 }
 

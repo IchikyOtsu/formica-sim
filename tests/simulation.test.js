@@ -27,6 +27,7 @@ import {
 import { assertSimulationInvariants, inspectSimulationInvariants } from "../src/simulation/Invariants.js";
 import { World } from "../src/simulation/World.js";
 import { FoodDetectionSystem } from "../src/systems/FoodDetectionSystem.js";
+import { FoodCollectionSystem } from "../src/systems/FoodCollectionSystem.js";
 import { EnvironmentSystem } from "../src/systems/EnvironmentSystem.js";
 import { FoodSpawnSystem } from "../src/systems/FoodSpawnSystem.js";
 import { HazardSystem } from "../src/systems/HazardSystem.js";
@@ -49,6 +50,41 @@ function foragingConfig(overrides = {}) {
     foodDetectionRadius: 30,
     nest: { x: 15, y: 40, radius: 6 },
     foodSources: [{ x: 70, y: 40, quantity: 2, radius: 5 }],
+    ...overrides,
+  };
+}
+
+function multiColonyConfig(overrides = {}) {
+  return {
+    ...DEFAULT_CONFIG,
+    width: 200,
+    height: 100,
+    antSpeed: 0,
+    environmentEnabled: false,
+    reproductionEnabled: false,
+    foodRegenerationRate: 0,
+    dangerZones: [],
+    foreignDetectionRadius: 12,
+    territoryUpdateInterval: 1,
+    colonies: [
+      {
+        id: "A",
+        name: "Ambre",
+        color: "#f0b45f",
+        nest: { x: 20, y: 50, radius: 8 },
+        initialAnts: 1,
+        initialFoodStock: 0,
+      },
+      {
+        id: "B",
+        name: "Azur",
+        color: "#65a9d8",
+        nest: { x: 180, y: 50, radius: 8 },
+        initialAnts: 1,
+        initialFoodStock: 0,
+      },
+    ],
+    foodSources: [{ id: "SHARED", x: 100, y: 50, quantity: 1, radius: 6 }],
     ...overrides,
   };
 }
@@ -1196,6 +1232,164 @@ test("pause conditions identify events and numeric thresholds deterministically"
   assert.equal(evaluatePauseConditions([], metrics, { population: 10, stock: null }), "population ≥ 10");
   assert.equal(evaluatePauseConditions([], metrics, { stock: 4 }), "stock ≤ 4");
   assert.equal(evaluatePauseConditions([], metrics, { stock: null }), null);
+});
+
+test("multi-colony simulation creates independent nests, queens, workers, and stocks", () => {
+  const simulation = new Simulation(multiColonyConfig());
+  assert.equal(simulation.colonies.length, 2);
+  assert.equal(simulation.colony, simulation.colonies[0]);
+  assert.deepEqual(simulation.colonies.map(({ id }) => id), ["A", "B"]);
+  for (const colony of simulation.colonies) {
+    assert.equal(colony.queen.colonyId, colony.id);
+    assert.ok(colony.ants.every((ant) => ant.colonyId === colony.id));
+  }
+  assert.notEqual(simulation.colonies[0].nest.position.x, simulation.colonies[1].nest.position.x);
+});
+
+test("an ant deposits and senses pheromones only in its own colony field", () => {
+  const simulation = new Simulation(multiColonyConfig());
+  const [a, b] = simulation.colonies;
+  const antA = a.ants[0];
+  antA.position = { x: 70, y: 50 };
+  simulation.depositTrail(antA);
+  assert.ok(simulation.colonyPheromones.get("A").getStats(PheromoneType.HOME).total > 0);
+  assert.equal(simulation.colonyPheromones.get("B").getStats(PheromoneType.HOME).total, 0);
+
+  simulation.colonyPheromones.clear();
+  simulation.colonyPheromones.get("B").deposit(
+    PheromoneType.FOOD,
+    { x: antA.position.x + 10, y: antA.position.y },
+    50,
+  );
+  assert.equal(simulation.senseTrail(antA, PheromoneType.FOOD), null);
+  assert.equal(simulation.senseTrail(b.ants[0], PheromoneType.FOOD), null);
+});
+
+test("shared food pickup is atomic and alternating order removes a fixed first-colony advantage", () => {
+  const winnerAtTick = (tick) => {
+    const simulation = new Simulation(multiColonyConfig());
+    simulation.tickCount = tick;
+    for (const colony of simulation.colonies) {
+      colony.ants[0].position = { ...simulation.foodSources[0].position };
+    }
+    simulation.tick();
+    assert.equal(simulation.foodSources[0].quantity, 0);
+    assert.equal(simulation.colonies.flatMap((colony) => colony.ants)
+      .filter((ant) => ant.carryingFood).length, 1);
+    return simulation.colonies.find((colony) => colony.ants[0].carryingFood).id;
+  };
+  assert.equal(winnerAtTick(0), "A");
+  assert.equal(winnerAtTick(1), "B");
+});
+
+test("both colonies can collect distinct units from the same shared source", () => {
+  const simulation = new Simulation(multiColonyConfig({
+    foodSources: [{ id: "SHARED", x: 100, y: 50, quantity: 2, radius: 6 }],
+  }));
+  for (const colony of simulation.colonies) {
+    colony.ants[0].position = { ...simulation.foodSources[0].position };
+  }
+  simulation.tick();
+  assert.equal(simulation.foodSources[0].quantity, 0);
+  assert.ok(simulation.colonies.every((colony) => colony.ants[0].carryingFood));
+});
+
+test("a foreign nest cannot receive another colony's carried food", () => {
+  const simulation = new Simulation(multiColonyConfig());
+  const [a, b] = simulation.colonies;
+  const ant = a.ants[0];
+  ant.carryingFood = true;
+  ant.carryingFoodAmount = 1;
+  ant.state = AntState.RETURNING_HOME;
+  ant.position = { ...b.nest.position };
+  const collection = new FoodCollectionSystem();
+  assert.equal(collection.deposit(ant, b), false);
+  assert.equal(b.foodStock, 0);
+  assert.equal(ant.carryingFood, true);
+});
+
+test("reproduction remains isolated per colony", () => {
+  const config = multiColonyConfig({
+    colonies: multiColonyConfig().colonies.map((colony, index) => ({
+      ...colony,
+      initialFoodStock: 100,
+      reproductionEnabled: index === 0,
+      reproductionFoodThreshold: 0,
+      queenLayingCooldownTicks: 1,
+    })),
+  });
+  const simulation = new Simulation(config);
+  simulation.tick();
+  assert.equal(simulation.colonies[0].brood.length, 1);
+  assert.equal(simulation.colonies[1].brood.length, 0);
+});
+
+test("mortality and death ALARM remain isolated per colony", () => {
+  const simulation = new Simulation(multiColonyConfig());
+  const [a, b] = simulation.colonies;
+  const ant = a.ants[0];
+  ant.state = AntState.DEAD;
+  ant.energy = 0;
+  simulation.handleDeath(ant, "ENVIRONMENT", a);
+  assert.equal(simulation.getColonyMetrics("A").environmentalDeaths, 1);
+  assert.equal(simulation.getColonyMetrics("B").environmentalDeaths, 0);
+  assert.ok(simulation.colonyPheromones.get("A").getStats(PheromoneType.ALARM).total > 0);
+  assert.equal(simulation.colonyPheromones.get("B").getStats(PheromoneType.ALARM).total, 0);
+  assert.equal(b.ants[0].state, AntState.SEARCHING_FOOD);
+});
+
+test("foreign proximity produces local observations, metrics, and colony-tagged events", () => {
+  const simulation = new Simulation(multiColonyConfig());
+  const [antA, antB] = simulation.colonies.map((colony) => colony.ants[0]);
+  antA.position = { x: 100, y: 50 };
+  antB.position = { x: 105, y: 50 };
+  simulation.tick();
+  assert.deepEqual(antA.nearbyForeignAnts, [antB.id]);
+  assert.deepEqual(antB.nearbyForeignAnts, [antA.id]);
+  assert.equal(simulation.getMetrics().foreignContacts, 1);
+  assert.ok(simulation.tickEvents.some((event) => (
+    event.type === "FOREIGN_CONTACT" && event.colonyId === "A" && event.foreignColonyId === "B"
+  )));
+});
+
+test("territory map exposes controlled and contested cells without affecting behavior", () => {
+  const simulation = new Simulation(multiColonyConfig());
+  const position = { x: 100, y: 50 };
+  simulation.colonyPheromones.get("A").deposit(PheromoneType.HOME, position, 5);
+  simulation.colonyPheromones.get("B").deposit(PheromoneType.FOOD, position, 5);
+  simulation.territoryMap.update(simulation.pheromoneFields, ["A", "B"], {
+    minimumInfluence: 0.1,
+    contestThreshold: 0.5,
+  });
+  assert.ok(simulation.territoryMap.getStats().contested > 0);
+  assert.equal(simulation.colonies[0].ants[0].nearbyForeignAnts.length, 0);
+});
+
+test("multi-colony replay and global food conservation are exact", async () => {
+  const direct = new Simulation(multiColonyConfig());
+  direct.run(40);
+  assert.equal(assertSimulationInvariants(direct).valid, true);
+  const replayed = new Simulation(multiColonyConfig());
+  const previousAnimationFrame = globalThis.requestAnimationFrame;
+  globalThis.requestAnimationFrame = (callback) => setImmediate(callback);
+  try {
+    assert.equal(await new ReplayController(replayed).seek(40, { chunkSize: 7 }), true);
+  } finally {
+    globalThis.requestAnimationFrame = previousAnimationFrame;
+  }
+  assert.equal(JSON.stringify(replayed.getState()), JSON.stringify(direct.getState()));
+});
+
+test("removing one colony preserves the other colony and conservation ledger", () => {
+  const simulation = new Simulation(multiColonyConfig());
+  const survivorBefore = JSON.stringify(simulation.colonies[1]);
+  assert.equal(simulation.removeColony("A"), true);
+  assert.equal(simulation.colonies.length, 1);
+  assert.equal(simulation.colonies[0].id, "B");
+  assert.equal(JSON.stringify(simulation.colonies[0]), survivorBefore);
+  simulation.tick();
+  assert.equal(assertSimulationInvariants(simulation).valid, true);
+  assert.equal(simulation.removeColony("B"), false);
 });
 
 test("replay reconstructs an exact tick from seed and configuration", async () => {

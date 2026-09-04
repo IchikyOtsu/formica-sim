@@ -138,6 +138,12 @@ canvas { display: block; width: 100%; aspect-ratio: 800 / 520; max-height: calc(
 .chart-grid article { min-width: 0; padding: 10px; border: 1px solid var(--line); background: #191e17; }
 .chart-grid h3 { margin: 0 0 8px; color: #aeb5a5; font: 500 9px "DM Mono", monospace; letter-spacing: .08em; text-transform: uppercase; }
 .chart { width: 100%; height: 88px; aspect-ratio: auto; max-height: none; background: transparent; }
+.colony-comparison { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 10px; margin-top: 12px; }
+.colony-card { padding: 11px 12px; border: 1px solid var(--line); border-left: 3px solid var(--colony-color); background: #191e17; }
+.colony-card h3 { margin: 0 0 8px; color: var(--colony-color); font: 600 10px "DM Mono", monospace; letter-spacing: .08em; text-transform: uppercase; }
+.colony-card dl { display: grid; grid-template-columns: 1fr auto; gap: 5px 12px; margin: 0; font: 8px "DM Mono", monospace; }
+.colony-card dt { color: var(--muted); }
+.colony-card dd { margin: 0; color: var(--ink); }
 .analysis-footer { display: flex; align-items: flex-end; justify-content: space-between; gap: 14px; margin-top: 12px; }
 .replay-control, .sampling-control { display: flex; align-items: flex-end; gap: 8px; }
 .replay-control input, .sampling-control input { display: block; width: 110px; margin-top: 5px; }

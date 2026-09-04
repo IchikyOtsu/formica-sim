@@ -15,3 +15,7 @@ Invariants V1 vérifiés par `inspectSimulationInvariants()` :
 Le scénario officiel utilise la seed 1847 pendant 50 000 ticks. Les compteurs
 discrets ont une tolérance nulle ; stock et consommation `0.001`, distance
 `0.01`. Exécuter `npm run validate:reference` pour le comparer à la signature.
+
+En multi-colonies, l'ordre de résolution est A→B aux ticks pairs et B→A aux
+ticks impairs. Cette alternance déterministe évite de donner systématiquement la
+dernière unité d'une ressource à la première colonie du tableau.

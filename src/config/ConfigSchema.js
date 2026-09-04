@@ -4,10 +4,11 @@ export const CONFIG_SCHEMA_VERSION = 1;
 
 export const CONFIG_SECTIONS = Object.freeze({
   simulation: Object.freeze([
-    "width", "height", "tickDurationMs", "seed", "nest", "foodSources",
+    "width", "height", "tickDurationMs", "seed", "nest", "foodSources", "colonies",
   ]),
   ants: Object.freeze([
     "initialAnts", "antSpeed", "foodDetectionRadius", "foodPickupDistance",
+    "foreignDetectionRadius",
   ]),
   metabolism: Object.freeze([
     "antEnergy", "antMaxEnergy", "energyConsumptionRate", "carryingEnergyMultiplier",
@@ -25,7 +26,8 @@ export const CONFIG_SECTIONS = Object.freeze({
     "pheromoneMaxIntensity", "pheromoneSenseDistance", "pheromoneSenseArc",
     "pheromoneSenseSamples", "pheromoneMinSignal", "pheromoneInfluence",
     "homeTrailInfluence", "pheromoneRevisitPenalty", "recentCellMemory",
-    "explorationStrength",
+    "explorationStrength", "territoryMinimumInfluence", "territoryContestThreshold",
+    "territoryUpdateInterval",
   ]),
   demography: Object.freeze([
     "initialFoodStock", "reproductionEnabled", "queenLayingCooldownTicks",
@@ -91,7 +93,7 @@ export function validateFlatConfig(config) {
     }
   }
   for (const key of [
-    "width", "height", "tickDurationMs", "antMaxEnergy",
+    "width", "height", "tickDurationMs", "antMaxEnergy", "territoryUpdateInterval",
     "pheromoneCellSize", "pheromoneMaxIntensity", "seasonDurationTicks",
   ]) {
     if (config[key] <= 0) fail(key, "doit être positif");
@@ -99,7 +101,8 @@ export function validateFlatConfig(config) {
   for (const key of [
     "initialAnts", "antSpeed", "energyConsumptionRate", "basalEnergyConsumptionRate", "initialFoodStock",
     "eggFoodCost", "larvaFoodPerTick", "foodRegenerationRate", "foodSpawnProbability",
-    "pheromoneMinimumIntensity", "alarmMinimumIntensity",
+    "pheromoneMinimumIntensity", "alarmMinimumIntensity", "foreignDetectionRadius",
+    "territoryMinimumInfluence", "territoryContestThreshold",
   ]) {
     if (config[key] < 0) fail(key, "ne peut pas être négatif");
   }
@@ -110,11 +113,20 @@ export function validateFlatConfig(config) {
     if (config[key] < 0 || config[key] > 1) fail(key, "doit être compris entre 0 et 1");
   }
   if (!Number.isInteger(config.seed)) fail("seed", "entier attendu");
+  if (!Number.isInteger(config.territoryUpdateInterval)) {
+    fail("territoryUpdateInterval", "entier positif attendu");
+  }
   if (!Number.isInteger(config.initialAnts) || config.initialAnts < 0) {
     fail("initialAnts", "entier positif ou nul attendu");
   }
   if (!Array.isArray(config.foodSources)) fail("foodSources", "tableau attendu");
   if (!Array.isArray(config.dangerZones)) fail("dangerZones", "tableau attendu");
+  if (config.colonies !== null && !Array.isArray(config.colonies)) {
+    fail("colonies", "tableau ou null attendu");
+  }
+  if (Array.isArray(config.colonies) && config.colonies.length === 0) {
+    fail("colonies", "doit contenir au moins une colonie ou valoir null");
+  }
   validatePosition("nest", config.nest);
   config.foodSources.forEach((source, index) => {
     validatePosition(`foodSources[${index}]`, source);
@@ -123,6 +135,26 @@ export function validateFlatConfig(config) {
     }
   });
   config.dangerZones.forEach((zone, index) => validatePosition(`dangerZones[${index}]`, zone));
+  if (config.colonies) {
+    const ids = new Set();
+    config.colonies.forEach((colony, index) => {
+      if (!colony || typeof colony !== "object") fail(`colonies[${index}]`, "objet attendu");
+      if (typeof colony.id !== "string" || colony.id.length === 0) {
+        fail(`colonies[${index}].id`, "identifiant attendu");
+      }
+      if (ids.has(colony.id)) fail(`colonies[${index}].id`, "identifiant dupliqué");
+      ids.add(colony.id);
+      validatePosition(`colonies[${index}].nest`, colony.nest);
+      if (colony.initialAnts !== undefined
+        && (!Number.isInteger(colony.initialAnts) || colony.initialAnts < 0)) {
+        fail(`colonies[${index}].initialAnts`, "entier positif ou nul attendu");
+      }
+      if (colony.initialFoodStock !== undefined
+        && (!Number.isFinite(colony.initialFoodStock) || colony.initialFoodStock < 0)) {
+        fail(`colonies[${index}].initialFoodStock`, "nombre positif ou nul attendu");
+      }
+    });
+  }
   return config;
 }
 

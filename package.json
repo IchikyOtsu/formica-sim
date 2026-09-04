@@ -1,6 +1,6 @@
 {
   "name": "formica-sim",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -13,6 +13,7 @@
     "benchmark:pheromones": "node scripts/benchmark.js",
     "experiment": "node scripts/experiment.js",
     "validate": "node scripts/validate-v1.js",
-    "validate:reference": "node scripts/reference-scenario.js"
+    "validate:reference": "node scripts/reference-scenario.js",
+    "benchmark:competition": "node scripts/competition-benchmark.js"
   }
 }

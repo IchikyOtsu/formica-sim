@@ -6,9 +6,9 @@ const EPSILON = 1e-6;
 export function inspectSimulationInvariants(simulation) {
   const violations = [];
   const add = (name, details) => violations.push({ name, details });
-  const living = simulation.colony.ants.filter((ant) => ant.state !== AntState.DEAD);
+  const ants = simulation.colonies.flatMap((colony) => colony.ants);
 
-  for (const ant of simulation.colony.ants) {
+  for (const ant of ants) {
     if (ant.energy < -EPSILON || ant.energy > ant.maxEnergy + EPSILON) {
       add("worker-energy-bounds", `${ant.id}: ${ant.energy}`);
     }
@@ -17,34 +17,42 @@ export function inspectSimulationInvariants(simulation) {
       add("dead-worker-inert", ant.id);
     }
   }
-  if (simulation.colony.foodStock < -EPSILON) {
-    add("non-negative-food-stock", String(simulation.colony.foodStock));
+  for (const colony of simulation.colonies) {
+    const config = simulation.colonyConfigs.get(colony.id);
+    const living = colony.ants.filter((ant) => ant.state !== AntState.DEAD);
+    if (colony.foodStock < -EPSILON) {
+      add("non-negative-food-stock", `${colony.id}: ${colony.foodStock}`);
+    }
+    if (colony.brood.length > config.maxBrood) {
+      add("brood-limit", `${colony.id}: ${colony.brood.length} > ${config.maxBrood}`);
+    }
+    if (living.length + colony.brood.length > config.maxWorkers) {
+      add("worker-limit", `${colony.id}: ${living.length} + ${colony.brood.length}`);
+    }
   }
-  if (simulation.colony.brood.length > simulation.config.maxBrood) {
-    add("brood-limit", `${simulation.colony.brood.length} > ${simulation.config.maxBrood}`);
-  }
-  if (living.length + simulation.colony.brood.length > simulation.config.maxWorkers) {
-    add("worker-limit", `${living.length} + ${simulation.colony.brood.length}`);
-  }
-  for (const type of Object.values(PheromoneType)) {
-    for (const intensity of simulation.pheromoneField.layer(type)) {
-      if (!Number.isFinite(intensity) || intensity < -EPSILON) {
-        add("non-negative-pheromones", type);
-        break;
+  for (const [colonyId, field] of simulation.pheromoneFields) {
+    for (const type of Object.values(PheromoneType)) {
+      for (const intensity of field.layer(type)) {
+        if (!Number.isFinite(intensity) || intensity < -EPSILON) {
+          add("non-negative-pheromones", `${colonyId}:${type}`);
+          break;
+        }
       }
     }
   }
 
-  const inputs = simulation.config.initialFoodStock
+  const inputs = simulation.initialColonyFoodStock
     + simulation.initialFoodQuantity
     + simulation.regeneratedFood
     + simulation.spawnedFood;
-  const accounted = simulation.colony.foodStock
-    + simulation.colony.consumedFood
+  const accounted = simulation.colonies.reduce((sum, colony) => (
+    sum + colony.foodStock + colony.consumedFood
+  ), 0)
     + simulation.foodSources.reduce((sum, source) => sum + source.quantity, 0)
-    + simulation.colony.ants.reduce((sum, ant) => sum + ant.carryingFoodAmount, 0)
+    + ants.reduce((sum, ant) => sum + ant.carryingFoodAmount, 0)
     + simulation.lostFood
-    + simulation.expiredFood;
+    + simulation.expiredFood
+    + simulation.removedColonyFood;
   const massError = inputs - accounted;
   if (Math.abs(massError) > 1e-4) add("food-conservation", `écart=${massError}`);
 
