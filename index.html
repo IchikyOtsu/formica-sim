@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#171b13" />
+    <title>Formica — Laboratoire de colonie</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="./src/styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="topbar">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true">
+            <i></i><i></i><i></i>
+          </span>
+          <div>
+            <p class="eyebrow">Laboratoire de terrain</p>
+            <h1>FORMICA <span>/ SIM</span></h1>
+          </div>
+        </div>
+        <div class="status-pill"><span></span> Système opérationnel</div>
+      </header>
+
+      <section class="workspace">
+        <aside class="sidebar">
+          <div class="panel-heading">
+            <p class="eyebrow">Colonie</p>
+            <h2>Lasius niger</h2>
+            <p class="muted">Colonie <span id="colony-id">C-01</span> · Secteur Alpha</p>
+          </div>
+
+          <div class="metric-grid">
+            <article class="metric metric-wide">
+              <p>Population</p>
+              <strong id="ant-count">0</strong><span>fourmis</span>
+            </article>
+            <article class="metric">
+              <p>Sources</p>
+              <strong id="food-count">0</strong>
+            </article>
+            <article class="metric">
+              <p>Réserves</p>
+              <strong id="resources">0</strong><span>unités</span>
+            </article>
+          </div>
+
+          <div class="legend">
+            <p class="section-label">Légende</p>
+            <div><span class="legend-dot ant-dot"></span> Fourmi <em>Exploration</em></div>
+            <div><span class="legend-dot nest-dot"></span> Nid <em>Point d'origine</em></div>
+            <div><span class="legend-dot food-dot"></span> Nourriture <em>Ressource</em></div>
+          </div>
+
+          <div class="observation">
+            <p class="section-label">Observation</p>
+            <p>Les individus explorent leur environnement par marche aléatoire. Le monde contraint leurs déplacements.</p>
+          </div>
+        </aside>
+
+        <section class="simulation-panel" aria-label="Monde de simulation">
+          <div class="canvas-toolbar">
+            <div>
+              <p class="eyebrow">Vue en direct</p>
+              <h2>MONDE 2D <span>800 × 520</span></h2>
+            </div>
+            <div class="tick-readout"><span>Tick</span><strong id="tick">000000</strong></div>
+          </div>
+          <div class="canvas-wrap">
+            <canvas id="world" width="800" height="520">Votre navigateur ne prend pas en charge Canvas.</canvas>
+            <div class="coordinates">X 000—800&nbsp;&nbsp; Y 000—520</div>
+          </div>
+          <div class="controls" role="group" aria-label="Contrôles de simulation">
+            <button id="play-pause" class="primary" type="button"><span class="pause-icon" aria-hidden="true"></span><span class="button-text">Pause</span></button>
+            <button id="reset" type="button"><span class="reset-icon" aria-hidden="true">↻</span> Reset</button>
+            <div class="speed-control">
+              <span>Vitesse</span>
+              <button class="speed active" data-speed="1" type="button">×1</button>
+              <button class="speed" data-speed="2" type="button">×2</button>
+              <button class="speed" data-speed="5" type="button">×5</button>
+            </div>
+            <p class="sim-time"><span>Temps simulé</span><strong id="sim-time">00:00:00.0</strong></p>
+          </div>
+        </section>
+      </section>
+    </main>
+    <script type="module" src="./src/main.js"></script>
+  </body>
+</html>
