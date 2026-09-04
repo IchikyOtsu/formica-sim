@@ -12,6 +12,11 @@ export const ReturnReason = Object.freeze({
   ENERGY: "ENERGY",
 });
 
+export const Caste = Object.freeze({
+  WORKER: "WORKER",
+  SOLDIER: "SOLDIER",
+});
+
 export class Ant {
   constructor({
     id,
@@ -27,6 +32,7 @@ export class Ant {
     maxHealth = 60,
     attackPower = 0,
     combatCooldown = 0,
+    caste = Caste.WORKER,
   }) {
     this.id = id;
     this.position = { ...position };
@@ -42,6 +48,7 @@ export class Ant {
     this.health = health ?? maxHealth;
     this.attackPower = attackPower;
     this.combatCooldown = combatCooldown;
+    this.caste = caste;
     this.carryingFood = false;
     this.carryingFoodAmount = 0;
     this.age = 0;

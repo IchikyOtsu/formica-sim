@@ -1,25 +1,41 @@
 import { Brood, BroodStage } from "../entities/Brood.js";
-import { AntState } from "../entities/Ant.js";
+import { AntState, Caste } from "../entities/Ant.js";
 
 export class BroodSystem {
   constructor() {
     this.nextBroodId = 1;
     this.broodFoodConsumed = 0;
     this.layingFoodConsumed = 0;
+    this.militaryFoodConsumed = 0;
+  }
+
+  decideCaste(colony, config) {
+    if (!config.castesEnabled) return Caste.WORKER;
+    const livingAnts = colony.ants.filter((ant) => ant.state !== AntState.DEAD);
+    const soldierCount = livingAnts.filter((ant) => ant.caste === Caste.SOLDIER).length;
+    const currentRatio = livingAnts.length === 0 ? 0 : soldierCount / livingAnts.length;
+    const desiredRatio = Math.min(
+      config.casteSoldierRatioCap,
+      Math.max(0, colony.threatPressure / config.threatPressureRatioScale),
+    );
+    const wantsSoldier = colony.foodStock >= config.casteStockThreshold && currentRatio < desiredRatio;
+    return wantsSoldier ? Caste.SOLDIER : Caste.WORKER;
   }
 
   update(colony, config, developmentMultiplier = 1) {
-    if (!config.reproductionEnabled) return 0;
+    if (!config.reproductionEnabled) return [];
     const emerged = [];
     for (const brood of colony.brood) {
       brood.age += 1;
       if (brood.stage === BroodStage.EGG) {
         this.advanceFreeStage(brood, config.eggDurationTicks, BroodStage.LARVA, developmentMultiplier);
       } else if (brood.stage === BroodStage.LARVA) {
-        const needed = config.larvaFoodPerTick;
+        const isSoldier = brood.caste === Caste.SOLDIER;
+        const needed = config.larvaFoodPerTick * (isSoldier ? config.soldierLarvaFoodMultiplier : 1);
         const consumed = colony.consumeFood(needed);
         brood.foodConsumed += consumed;
         this.broodFoodConsumed += consumed;
+        if (isSoldier) this.militaryFoodConsumed += consumed;
         if (consumed + Number.EPSILON >= needed) {
           this.advanceFreeStage(
             brood,
@@ -45,18 +61,23 @@ export class BroodSystem {
     if (queen.cooldownRemaining === 0
       && colony.brood.length < config.maxBrood
       && livingWorkers + colony.brood.length < (config.maxWorkers ?? Infinity)
-      && colony.foodStock >= config.reproductionFoodThreshold
-      && colony.foodStock >= config.eggFoodCost) {
-      const consumed = colony.consumeFood(config.eggFoodCost);
-      if (consumed === config.eggFoodCost) {
-        colony.brood.push(new Brood({ id: `BROOD-${this.nextBroodId}` }));
-        this.nextBroodId += 1;
-        queen.eggsLaid += 1;
-        queen.cooldownRemaining = queen.layingCooldownTicks;
-        this.layingFoodConsumed += consumed;
+      && colony.foodStock >= config.reproductionFoodThreshold) {
+      const caste = this.decideCaste(colony, config);
+      const isSoldier = caste === Caste.SOLDIER;
+      const eggCost = config.eggFoodCost * (isSoldier ? config.soldierEggFoodMultiplier : 1);
+      if (colony.foodStock >= eggCost) {
+        const consumed = colony.consumeFood(eggCost);
+        if (consumed === eggCost) {
+          colony.brood.push(new Brood({ id: `BROOD-${this.nextBroodId}`, caste }));
+          this.nextBroodId += 1;
+          queen.eggsLaid += 1;
+          queen.cooldownRemaining = queen.layingCooldownTicks;
+          this.layingFoodConsumed += consumed;
+          if (isSoldier) this.militaryFoodConsumed += consumed;
+        }
       }
     }
-    return emerged.length;
+    return emerged;
   }
 
   advanceFreeStage(brood, duration, nextStage, developmentMultiplier = 1) {

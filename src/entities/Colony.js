@@ -24,6 +24,12 @@ export class Colony {
     this.combatLosses = 0;
     this.threats = 0;
     this.damageDealt = 0;
+    this.workerKills = 0;
+    this.soldierKills = 0;
+    this.workerLosses = 0;
+    this.soldierLosses = 0;
+    this.soldierBirths = 0;
+    this.threatPressure = 0;
     this.maxPopulation = 1;
   }
 

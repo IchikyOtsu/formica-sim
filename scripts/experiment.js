@@ -7,6 +7,7 @@ const scripts = {
   pheromones: "./benchmark.js",
   competition: "./competition-benchmark.js",
   combat: "./combat-benchmark.js",
+  castes: "./castes-benchmark.js",
 };
 
 if (!scripts[experiment]) {

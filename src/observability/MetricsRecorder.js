@@ -76,6 +76,15 @@ export class MetricsRecorder {
         combatLosses: colony.combatLosses,
         threats: colony.threats,
         damageDealt: colony.damageDealt,
+        soldierCount: colony.soldierCount,
+        workerCount: colony.workerCount,
+        soldierBirths: colony.soldierBirths,
+        militaryFoodCost: colony.militaryFoodCost,
+        threatPressure: colony.threatPressure,
+        workerKills: colony.workerKills,
+        soldierKills: colony.soldierKills,
+        workerLosses: colony.workerLosses,
+        soldierLosses: colony.soldierLosses,
       })),
     });
   }

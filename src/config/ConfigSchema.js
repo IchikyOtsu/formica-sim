@@ -41,6 +41,15 @@ export const CONFIG_SECTIONS = Object.freeze({
     "combatFleeHealthRatio", "combatThreatenAlarmStrength", "combatThreatenTerritoryStrength",
     "combatDeathAlarmStrength", "combatNumbersAdvantageWeight", "combatTerritorialAdvantageWeight",
   ]),
+  castes: Object.freeze([
+    "castesEnabled", "soldierMaxHealth", "soldierAttackPower", "soldierEnergyConsumptionMultiplier",
+    "soldierBasalEnergyMultiplier", "soldierSpeedMultiplier", "soldierLarvaFoodMultiplier",
+    "soldierEggFoodMultiplier", "soldierCombatAttackThreshold", "soldierCombatThreatenThreshold",
+    "soldierEncounterAvoidanceThreshold", "soldierCombatFleeHealthRatio", "soldierAlarmRallyWeight",
+    "soldierTerritoryInterceptWeight", "casteSoldierRatioCap", "casteStockThreshold",
+    "threatPressureDecay", "threatPressureContactWeight", "threatPressureDeathWeight",
+    "threatPressureAlarmWeight", "threatPressureRatioScale",
+  ]),
   demography: Object.freeze([
     "initialFoodStock", "reproductionEnabled", "queenLayingCooldownTicks",
     "reproductionFoodThreshold", "eggFoodCost", "maxBrood", "maxWorkers",
@@ -107,7 +116,7 @@ export function validateFlatConfig(config) {
   for (const key of [
     "width", "height", "tickDurationMs", "antMaxEnergy", "territoryUpdateInterval",
     "pheromoneCellSize", "pheromoneMaxIntensity", "seasonDurationTicks", "territoryFalloffDistance",
-    "combatRadius", "combatMaxHealth",
+    "combatRadius", "combatMaxHealth", "soldierMaxHealth",
   ]) {
     if (config[key] <= 0) fail(key, "doit être positif");
   }
@@ -120,6 +129,11 @@ export function validateFlatConfig(config) {
     "combatAttackPower", "combatAttackEnergyCost", "combatDamageRandomMin", "combatDamageRandomMax",
     "combatThreatenAlarmStrength", "combatThreatenTerritoryStrength", "combatDeathAlarmStrength",
     "combatNumbersAdvantageWeight", "combatTerritorialAdvantageWeight",
+    "soldierAttackPower", "soldierEnergyConsumptionMultiplier", "soldierBasalEnergyMultiplier",
+    "soldierSpeedMultiplier", "soldierLarvaFoodMultiplier", "soldierEggFoodMultiplier",
+    "soldierAlarmRallyWeight", "soldierTerritoryInterceptWeight", "casteStockThreshold",
+    "threatPressureContactWeight", "threatPressureDeathWeight", "threatPressureAlarmWeight",
+    "threatPressureRatioScale",
   ]) {
     if (config[key] < 0) fail(key, "ne peut pas être négatif");
   }
@@ -128,6 +142,9 @@ export function validateFlatConfig(config) {
     "alarmDiffusionRate", "lowEnergyThreshold", "resumeEnergyThreshold",
     "territoryEvaporationRate", "territoryDiffusionRate", "encounterAvoidanceThreshold",
     "combatThreatenThreshold", "combatAttackThreshold", "combatFleeHealthRatio",
+    "soldierCombatAttackThreshold", "soldierCombatThreatenThreshold",
+    "soldierEncounterAvoidanceThreshold", "soldierCombatFleeHealthRatio",
+    "casteSoldierRatioCap", "threatPressureDecay",
   ]) {
     if (config[key] < 0 || config[key] > 1) fail(key, "doit être compris entre 0 et 1");
   }

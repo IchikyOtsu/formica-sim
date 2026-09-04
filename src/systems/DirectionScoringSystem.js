@@ -32,13 +32,13 @@ export class DirectionScoringSystem {
       }
       if ((options.foodWeight > 0 && food >= options.minimumSignal)
         || (options.homeWeight > 0 && home >= options.minimumSignal)
-        || (options.alarmWeight > 0 && alarm >= options.minimumAlarmSignal)
-        || (territoryWeight > 0 && foreignTerritory >= options.minimumSignal)) hasSignal = true;
+        || (options.alarmWeight !== 0 && alarm >= options.minimumAlarmSignal)
+        || (territoryWeight !== 0 && foreignTerritory >= options.minimumSignal)) hasSignal = true;
       const recentlyVisited = ant.recentCells.includes(field.indexAt(position));
       const revisitFactor = recentlyVisited ? options.revisitPenalty : 1;
       const attraction = (food * options.foodWeight + home * options.homeWeight) * revisitFactor;
       const repulsion = alarm * options.alarmWeight + foreignTerritory * territoryWeight;
-      maximumAlarmRepulsion = Math.max(maximumAlarmRepulsion, repulsion);
+      maximumAlarmRepulsion = Math.max(maximumAlarmRepulsion, Math.abs(repulsion));
       const inertia = Math.cos(angleDifference(direction, ant.direction)) * options.inertiaWeight;
       candidates.push({ direction, attraction, repulsion, inertia });
     }

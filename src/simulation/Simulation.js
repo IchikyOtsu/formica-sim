@@ -1,7 +1,7 @@
 import { RandomWalk } from "../behaviors/RandomWalk.js";
 import { ReturnHomeBehavior } from "../behaviors/ReturnHomeBehavior.js";
 import { SearchFoodBehavior } from "../behaviors/SearchFoodBehavior.js";
-import { Ant, AntState } from "../entities/Ant.js";
+import { Ant, AntState, Caste } from "../entities/Ant.js";
 import { Colony } from "../entities/Colony.js";
 import { BroodStage } from "../entities/Brood.js";
 import { FoodSource } from "../entities/FoodSource.js";
@@ -190,6 +190,8 @@ export class Simulation {
     this.combatDeaths = 0;
     this.activeCombats = new Map();
     this.currentForeignContacts = [];
+    this.newCombatLossesThisTick = new Map();
+    this.newForeignContactsThisTick = new Map();
 
     for (const colony of this.colonies) {
       const colonyConfig = this.colonyConfigs.get(colony.id);
@@ -230,6 +232,7 @@ export class Simulation {
 
   tick() {
     this.tickEvents = [];
+    this.newCombatLossesThisTick = new Map();
     const deltaSeconds = this.config.tickDurationMs / 1000;
     const consumedAtStart = this.colonies.reduce((sum, colony) => sum + colony.consumedFood, 0);
     const previousSeason = this.currentEnvironment.season;
@@ -299,7 +302,7 @@ export class Simulation {
           0,
           deltaSeconds,
           colonyConfig.carryingEnergyMultiplier,
-          colonyConfig.basalEnergyConsumptionRate,
+          this.basalRateFor(ant, colonyConfig),
           1,
           this.currentEnvironment.metabolismMultiplier,
         )) {
@@ -342,7 +345,7 @@ export class Simulation {
         );
         targetDistance = this.returnHome.update(ant, navigation, localHome, deltaSeconds);
       } else {
-        const food = this.foodDetection.findNearest(
+        const food = ant.caste === Caste.SOLDIER ? null : this.foodDetection.findNearest(
           ant,
           this.foodSources,
           colonyConfig.foodDetectionRadius,
@@ -389,7 +392,7 @@ export class Simulation {
         distance,
         deltaSeconds,
         colonyConfig.carryingEnergyMultiplier,
-        colonyConfig.basalEnergyConsumptionRate,
+        this.basalRateFor(ant, colonyConfig),
         this.currentEnvironment.movementCostMultiplier * exposure.movementMultiplier,
         this.currentEnvironment.metabolismMultiplier,
       )) {
@@ -457,7 +460,7 @@ export class Simulation {
       }
     }
       const eggsBeforeUpdate = colony.queen.eggsLaid;
-      const emergedWorkers = this.broodSystems.get(colony.id).update(
+      const emergedBroods = this.broodSystems.get(colony.id).update(
         colony,
         colonyConfig,
         this.currentEnvironment.broodDevelopmentMultiplier,
@@ -465,18 +468,22 @@ export class Simulation {
       if (colony.queen.eggsLaid > eggsBeforeUpdate) {
         this.emitEvent("QUEEN_LAID_EGG", { queenId: colony.queen.id, colonyId: colony.id });
       }
-      for (let index = 0; index < emergedWorkers; index += 1) this.spawnWorker(colony);
-      if (emergedWorkers > 0) {
-        this.emitEvent("WORKERS_EMERGED", { count: emergedWorkers, colonyId: colony.id });
+      for (const brood of emergedBroods) {
+        this.spawnWorker(colony, brood.caste);
+        if (brood.caste === Caste.SOLDIER) colony.soldierBirths += 1;
       }
-      colony.births += emergedWorkers;
-      this.births += emergedWorkers;
+      if (emergedBroods.length > 0) {
+        this.emitEvent("WORKERS_EMERGED", { count: emergedBroods.length, colonyId: colony.id });
+      }
+      colony.births += emergedBroods.length;
+      this.births += emergedBroods.length;
       const colonyPopulation = colony.ants.filter((ant) => ant.state !== AntState.DEAD).length
         + colony.brood.length + 1;
       colony.maxPopulation = Math.max(colony.maxPopulation, colonyPopulation);
     }
     this.updateForeignContacts();
     this.resolveCombat();
+    this.updateThreatPressure();
     if (this.colonies.length > 1 && this.tickCount % this.config.territoryUpdateInterval === 0) {
       this.territoryMap.update(this.pheromoneFields, this.colonies.map(({ id }) => id), {
         minimumInfluence: this.config.territoryMinimumInfluence,
@@ -509,7 +516,13 @@ export class Simulation {
     if (cause === "COMBAT") {
       this.combatDeaths += 1;
       colony.combatLosses += 1;
-      if (extra.killerColony) extra.killerColony.kills += 1;
+      if (ant.caste === Caste.SOLDIER) colony.soldierLosses += 1; else colony.workerLosses += 1;
+      if (extra.killerColony) {
+        extra.killerColony.kills += 1;
+        if (extra.killerCaste === Caste.SOLDIER) extra.killerColony.soldierKills += 1;
+        else extra.killerColony.workerKills += 1;
+      }
+      this.newCombatLossesThisTick.set(colony.id, (this.newCombatLossesThisTick.get(colony.id) ?? 0) + 1);
       this.emitEvent("COMBAT_DEATH", {
         colonyId: colony.id,
         antId: ant.id,
@@ -550,6 +563,8 @@ export class Simulation {
     ant.returnStartedTick = null;
     ant.returnDistance = 0;
     ant.directReturnDistance = 0;
+    ant.target = null;
+    ant.returnReason = null;
   }
 
   emitEvent(type, details = {}) {
@@ -588,6 +603,7 @@ export class Simulation {
   }
 
   updateForeignContacts() {
+    this.newForeignContactsThisTick = new Map();
     if (this.colonies.length < 2) {
       this.currentForeignContacts = [];
       return;
@@ -602,6 +618,14 @@ export class Simulation {
       const secondColony = this.colonyForAnt(contact.second);
       firstColony.foreignContacts += 1;
       secondColony.foreignContacts += 1;
+      this.newForeignContactsThisTick.set(
+        firstColony.id,
+        (this.newForeignContactsThisTick.get(firstColony.id) ?? 0) + 1,
+      );
+      this.newForeignContactsThisTick.set(
+        secondColony.id,
+        (this.newForeignContactsThisTick.get(secondColony.id) ?? 0) + 1,
+      );
       this.emitEvent("FOREIGN_CONTACT", {
         colonyId: firstColony.id,
         antId: contact.first.id,
@@ -615,7 +639,11 @@ export class Simulation {
   }
 
   applyEncounterReaction(ant, colony) {
-    const reaction = this.encounterReaction.evaluate(ant, this.config.encounterAvoidanceThreshold);
+    const colonyConfig = this.colonyConfigs.get(ant.colonyId);
+    const threshold = ant.caste === Caste.SOLDIER
+      ? colonyConfig.soldierEncounterAvoidanceThreshold
+      : colonyConfig.encounterAvoidanceThreshold;
+    const reaction = this.encounterReaction.evaluate(ant, threshold);
     if (reaction !== EncounterReaction.AVOID) return;
     const otherId = ant.nearbyForeignAnts[0];
     const other = this.colonies
@@ -629,6 +657,11 @@ export class Simulation {
     this.avoidedContacts += 1;
     colony.avoidedContacts += 1;
     this.emitEvent("FOREIGN_AVOIDANCE", { colonyId: colony.id, antId: ant.id });
+  }
+
+  basalRateFor(ant, colonyConfig) {
+    return colonyConfig.basalEnergyConsumptionRate
+      * (ant.caste === Caste.SOLDIER ? colonyConfig.soldierBasalEnergyMultiplier : 1);
   }
 
   countNearbyAllies(ant, colony, radius) {
@@ -673,15 +706,22 @@ export class Simulation {
         const ownInfluence = ownField.sample(PheromoneType.TERRITORY, ant.position) / ownField.maxIntensity;
         const foreignInfluence = foreignField.sample(PheromoneType.TERRITORY, ant.position)
           / foreignField.maxIntensity;
+        const isSoldier = ant.caste === Caste.SOLDIER;
         const stance = this.encounterReaction.evaluateStance(ant, {
           allyCount,
           enemyCount: ant.nearbyForeignAnts.length,
           territorialAdvantage: ownInfluence - foreignInfluence,
           numbersWeight: colonyConfig.combatNumbersAdvantageWeight,
           territoryWeight: colonyConfig.combatTerritorialAdvantageWeight,
-          threatenThreshold: colonyConfig.combatThreatenThreshold,
-          attackThreshold: colonyConfig.combatAttackThreshold,
-          fleeHealthRatio: colonyConfig.combatFleeHealthRatio,
+          threatenThreshold: isSoldier
+            ? colonyConfig.soldierCombatThreatenThreshold
+            : colonyConfig.combatThreatenThreshold,
+          attackThreshold: isSoldier
+            ? colonyConfig.soldierCombatAttackThreshold
+            : colonyConfig.combatAttackThreshold,
+          fleeHealthRatio: isSoldier
+            ? colonyConfig.soldierCombatFleeHealthRatio
+            : colonyConfig.combatFleeHealthRatio,
         });
         stances.set(ant.id, { stance, ant, opponent, colony, opponentColony });
         if (stance === EncounterReaction.ATTACK) {
@@ -771,7 +811,23 @@ export class Simulation {
       this.handleDeath(defender, "COMBAT", opponentColony, {
         killerId: attacker.id,
         killerColony: colony,
+        killerCaste: attacker.caste,
       });
+    }
+  }
+
+  updateThreatPressure() {
+    for (const colony of this.colonies) {
+      const colonyConfig = this.colonyConfigs.get(colony.id);
+      if (!colonyConfig.castesEnabled) continue;
+      const field = this.colonyPheromones.get(colony.id);
+      const alarmAtNest = field.sample(PheromoneType.ALARM, colony.nest.position) / field.maxIntensity;
+      const newContacts = this.newForeignContactsThisTick.get(colony.id) ?? 0;
+      const newDeaths = this.newCombatLossesThisTick.get(colony.id) ?? 0;
+      colony.threatPressure = colony.threatPressure * colonyConfig.threatPressureDecay
+        + newContacts * colonyConfig.threatPressureContactWeight
+        + newDeaths * colonyConfig.threatPressureDeathWeight
+        + alarmAtNest * colonyConfig.threatPressureAlarmWeight;
     }
   }
 
@@ -789,8 +845,9 @@ export class Simulation {
     }
   }
 
-  spawnWorker(colony = this.colony) {
+  spawnWorker(colony = this.colony, caste = Caste.WORKER) {
     const colonyConfig = this.colonyConfigs.get(colony.id);
+    const isSoldier = caste === Caste.SOLDIER;
     const nest = colony.nest;
     const angle = this.birthRandom() * Math.PI * 2;
     const distance = this.birthRandom() * nest.radius * 0.55;
@@ -803,14 +860,17 @@ export class Simulation {
         y: nest.position.y + Math.sin(angle) * distance,
       },
       direction: this.birthRandom() * Math.PI * 2,
-      speed: colonyConfig.antSpeed * (0.75 + this.birthRandom() * 0.5),
+      speed: colonyConfig.antSpeed * (0.75 + this.birthRandom() * 0.5)
+        * (isSoldier ? colonyConfig.soldierSpeedMultiplier : 1),
       colonyId: colony.id,
       energy: colonyConfig.antMaxEnergy,
       maxEnergy: colonyConfig.antMaxEnergy,
-      energyConsumptionRate: colonyConfig.energyConsumptionRate,
+      energyConsumptionRate: colonyConfig.energyConsumptionRate
+        * (isSoldier ? colonyConfig.soldierEnergyConsumptionMultiplier : 1),
       lowEnergyThreshold: colonyConfig.lowEnergyThreshold,
-      maxHealth: colonyConfig.combatMaxHealth,
-      attackPower: colonyConfig.combatAttackPower,
+      maxHealth: isSoldier ? colonyConfig.soldierMaxHealth : colonyConfig.combatMaxHealth,
+      attackPower: isSoldier ? colonyConfig.soldierAttackPower : colonyConfig.combatAttackPower,
+      caste,
     });
     this.nextAntIds.set(colony.id, this.nextAntIds.get(colony.id) + 1);
     colony.ants.push(ant);
@@ -835,7 +895,9 @@ export class Simulation {
     const field = this.colonyPheromones.get(ant.colonyId);
     if (!config.pheromonesEnabled) return null;
     const returning = state === AntState.RETURNING_HOME;
-    const foreignFields = this.colonies.length > 1 && config.territoryPheromonesEnabled
+    const isSoldier = ant.caste === Caste.SOLDIER;
+    const foreignFields = this.colonies.length > 1
+      && (config.territoryPheromonesEnabled || isSoldier)
       ? this.colonies
         .filter((colony) => colony.id !== ant.colonyId)
         .map((colony) => this.colonyPheromones.get(colony.id))
@@ -847,15 +909,22 @@ export class Simulation {
       minimumSignal: config.pheromoneMinSignal / field.maxIntensity,
       minimumAlarmSignal: config.alarmMinimumIntensity / field.maxIntensity,
       revisitPenalty: config.pheromoneRevisitPenalty,
-      foodWeight: !returning && config.foodPheromonesEnabled
+      foodWeight: !returning && config.foodPheromonesEnabled && !isSoldier
         ? config.pheromoneInfluence
         : 0,
       homeWeight: returning && config.homePheromonesEnabled
         ? config.homeTrailInfluence
         : 0,
-      alarmWeight: config.alarmPheromonesEnabled ? config.alarmInfluence : 0,
+      // Un soldat est attiré par l'ALARM propre (rallie la perturbation) et le
+      // TERRITORY étranger (intercepte les intruses) au lieu d'être repoussé :
+      // même mécanisme de répulsion, poids négatif.
+      alarmWeight: isSoldier
+        ? (config.alarmPheromonesEnabled ? -config.soldierAlarmRallyWeight : 0)
+        : (config.alarmPheromonesEnabled ? config.alarmInfluence : 0),
       foreignFields,
-      territoryWeight: config.territoryAvoidanceInfluence,
+      territoryWeight: isSoldier
+        ? -config.soldierTerritoryInterceptWeight
+        : config.territoryAvoidanceInfluence,
       inertiaWeight: config.navigationInertia,
       noiseWeight: config.navigationNoise,
       baseInfluence: returning ? config.homeTrailInfluence : config.pheromoneInfluence,
@@ -986,6 +1055,15 @@ export class Simulation {
       broodSize: colony.brood.length,
       broodFoodCost: broodSystem.broodFoodConsumed,
       reproductionFoodCost: broodSystem.layingFoodConsumed,
+      militaryFoodCost: broodSystem.militaryFoodConsumed,
+      soldierCount: livingAnts.filter((ant) => ant.caste === Caste.SOLDIER).length,
+      workerCount: livingAnts.filter((ant) => ant.caste === Caste.WORKER).length,
+      soldierBirths: colony.soldierBirths,
+      threatPressure: colony.threatPressure,
+      workerKills: colony.workerKills,
+      soldierKills: colony.soldierKills,
+      workerLosses: colony.workerLosses,
+      soldierLosses: colony.soldierLosses,
       resources: colony.resources,
       resourceShare: totalCollected === 0 ? 0 : colony.resources / totalCollected,
       foodStock: colony.foodStock,

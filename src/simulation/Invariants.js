@@ -1,4 +1,4 @@
-import { AntState } from "../entities/Ant.js";
+import { AntState, Caste } from "../entities/Ant.js";
 import { PheromoneType } from "./PheromoneField.js";
 
 const EPSILON = 1e-6;
@@ -21,6 +21,9 @@ export function inspectSimulationInvariants(simulation) {
     }
     if (ant.state !== AntState.DEAD && ant.health <= 0) {
       add("living-worker-positive-health", `${ant.id}: ${ant.health}`);
+    }
+    if (ant.caste === Caste.SOLDIER && ant.carryingFood) {
+      add("soldier-never-forages", ant.id);
     }
   }
   for (const colony of simulation.colonies) {

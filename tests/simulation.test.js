@@ -8,7 +8,7 @@ import { TimeSeries } from "../src/observability/TimeSeries.js";
 import { evaluatePauseConditions } from "../src/observability/PauseConditions.js";
 import { SearchFoodBehavior } from "../src/behaviors/SearchFoodBehavior.js";
 import { ReturnHomeBehavior } from "../src/behaviors/ReturnHomeBehavior.js";
-import { Ant, AntState } from "../src/entities/Ant.js";
+import { Ant, AntState, Caste } from "../src/entities/Ant.js";
 import { Brood, BroodStage } from "../src/entities/Brood.js";
 import { FoodSource, FoodSourceState } from "../src/entities/FoodSource.js";
 import { DangerZone } from "../src/environment/DangerZone.js";
@@ -37,6 +37,9 @@ import { PheromoneSensingSystem } from "../src/systems/PheromoneSensingSystem.js
 import { MetabolismSystem } from "../src/systems/MetabolismSystem.js";
 import { DirectionScoringSystem } from "../src/systems/DirectionScoringSystem.js";
 import { EncounterReactionSystem, EncounterReaction } from "../src/systems/EncounterReactionSystem.js";
+import { BroodSystem } from "../src/systems/BroodSystem.js";
+import { Colony } from "../src/entities/Colony.js";
+import { Nest } from "../src/entities/Nest.js";
 
 function foragingConfig(overrides = {}) {
   return {
@@ -634,7 +637,7 @@ test("brood develops EGG to LARVA to PUPA and consumes only as a larva", () => {
   assert.equal(simulation.colony.brood[0].stage, BroodStage.PUPA);
   system.update(simulation.colony, simulation.config);
   const emerged = system.update(simulation.colony, simulation.config);
-  assert.equal(emerged, 1);
+  assert.equal(emerged.length, 1);
   assert.equal(simulation.colony.brood.length, 0);
   assert.equal(system.broodFoodConsumed, 1);
   assert.equal(system.layingFoodConsumed, 1);
@@ -1673,4 +1676,147 @@ test("replay reconstructs an exact tick from seed and configuration", async () =
     replayed.pheromoneField.layer(PheromoneType.FOOD),
     reference.pheromoneField.layer(PheromoneType.FOOD),
   );
+});
+
+function casteConfig(overrides = {}) {
+  return multiColonyConfig({
+    reproductionEnabled: true,
+    castesEnabled: true,
+    casteStockThreshold: 5,
+    casteSoldierRatioCap: 0.4,
+    threatPressureRatioScale: 10,
+    threatPressureDecay: 0.9,
+    queenLayingCooldownTicks: 1,
+    reproductionFoodThreshold: 0,
+    eggFoodCost: 1,
+    eggDurationTicks: 1,
+    larvaDurationTicks: 1,
+    pupaDurationTicks: 1,
+    larvaFoodPerTick: 0,
+    maxBrood: 10,
+    maxWorkers: 200,
+    colonies: multiColonyConfig().colonies.map((colony) => ({ ...colony, initialFoodStock: 200 })),
+    ...overrides,
+  });
+}
+
+test("decideCaste requires stock and threat pressure, and respects the ratio cap", () => {
+  const system = new BroodSystem();
+  const colony = new Colony({ id: "A", nest: new Nest(0, 0, 5) });
+  const config = { castesEnabled: true, casteStockThreshold: 10, casteSoldierRatioCap: 0.3, threatPressureRatioScale: 10 };
+
+  colony.foodStock = 0;
+  colony.threatPressure = 100;
+  assert.equal(system.decideCaste(colony, config), Caste.WORKER, "stock too low");
+
+  colony.foodStock = 20;
+  colony.threatPressure = 0;
+  assert.equal(system.decideCaste(colony, config), Caste.WORKER, "no threat pressure");
+
+  colony.threatPressure = 100;
+  assert.equal(system.decideCaste(colony, config), Caste.SOLDIER, "stock ok, pressure high, under ratio cap");
+
+  for (let index = 0; index < 7; index += 1) {
+    colony.ants.push(new Ant({
+      id: `W${index}`, position: { x: 0, y: 0 }, direction: 0, speed: 0, colonyId: "A", caste: Caste.WORKER,
+    }));
+  }
+  for (let index = 0; index < 3; index += 1) {
+    colony.ants.push(new Ant({
+      id: `S${index}`, position: { x: 0, y: 0 }, direction: 0, speed: 0, colonyId: "A", caste: Caste.SOLDIER,
+    }));
+  }
+  assert.equal(system.decideCaste(colony, config), Caste.WORKER, "ratio cap reached (3/10 = 0.3)");
+});
+
+test("castesEnabled = false never produces a SOLDIER even under reproduction and combat", () => {
+  const simulation = new Simulation(casteConfig({ castesEnabled: false }));
+  const [antA, antB] = simulation.colonies.map((colony) => colony.ants[0]);
+  antA.position = { x: 100, y: 50 };
+  antB.position = { x: 102, y: 50 };
+  for (let index = 0; index < 300; index += 1) simulation.tick();
+  const allAnts = simulation.colonies.flatMap((colony) => colony.ants);
+  assert.ok(allAnts.length > 2);
+  assert.ok(allAnts.every((ant) => ant.caste === Caste.WORKER));
+  for (const colony of simulation.colonies) {
+    assert.equal(colony.soldierBirths, 0);
+    assert.equal(simulation.getColonyMetrics(colony).soldierCount, 0);
+  }
+});
+
+test("a produced soldier has distinct combat stats and never forages", () => {
+  const simulation = new Simulation(casteConfig());
+  const colonyA = simulation.colonies[0];
+  colonyA.threatPressure = 100;
+  for (let index = 0; index < 20; index += 1) simulation.tick();
+  const soldier = colonyA.ants.find((ant) => ant.caste === Caste.SOLDIER);
+  assert.ok(soldier, "a soldier should have been produced under sustained threat pressure");
+  const worker = colonyA.ants.find((ant) => ant.caste === Caste.WORKER && ant.id !== soldier.id);
+  assert.equal(soldier.maxHealth, simulation.config.soldierMaxHealth);
+  assert.equal(soldier.attackPower, simulation.config.soldierAttackPower);
+  assert.notEqual(soldier.maxHealth, worker.maxHealth);
+  assert.notEqual(soldier.attackPower, worker.attackPower);
+  for (let index = 0; index < 200; index += 1) {
+    simulation.tick();
+    assert.equal(soldier.carryingFood, false);
+    assert.equal(soldier.target, null);
+  }
+});
+
+test("soldiers use a distinct, more aggressive combat threshold than workers", () => {
+  const simulation = new Simulation(casteConfig({ combatRadius: 10 }));
+  const [antA, antB] = simulation.colonies.map((colony) => colony.ants[0]);
+  antA.caste = Caste.SOLDIER;
+  antA.maxHealth = simulation.config.soldierMaxHealth;
+  antA.health = antA.maxHealth;
+  antA.attackPower = simulation.config.soldierAttackPower;
+  antA.position = { x: 100, y: 50 };
+  antB.position = { x: 102, y: 50 };
+  simulation.tick();
+  assert.ok(simulation.tickEvents.some((event) => (
+    event.type === "ANT_ATTACKED" && event.antId === antA.id
+  )), "a soldier at full health/energy should attack given its low soldierCombatAttackThreshold");
+});
+
+test("threatPressure accumulates with combat deaths and decays without renewed contact", () => {
+  const simulation = new Simulation(casteConfig({
+    combatAttackPower: 1000,
+    threatPressureDecay: 0.5,
+  }));
+  const [antA, antB] = simulation.colonies.map((colony) => colony.ants[0]);
+  const colonyB = simulation.colonies[1];
+  antA.position = { x: 100, y: 50 };
+  antB.position = { x: 102, y: 50 };
+  antB.attackPower = 0;
+  simulation.tick();
+  const pressureAfterDeath = colonyB.threatPressure;
+  assert.ok(pressureAfterDeath > 0);
+  for (let index = 0; index < 20; index += 1) simulation.tick();
+  assert.ok(colonyB.threatPressure < pressureAfterDeath);
+});
+
+test("military metrics expose caste composition, births, and food cost", () => {
+  const simulation = new Simulation(casteConfig());
+  const colonyA = simulation.colonies[0];
+  colonyA.threatPressure = 100;
+  for (let index = 0; index < 20; index += 1) simulation.tick();
+  const metrics = simulation.getColonyMetrics(colonyA);
+  assert.ok(metrics.soldierCount >= 1);
+  assert.ok(metrics.soldierBirths >= 1);
+  assert.equal(metrics.soldierCount + metrics.workerCount, metrics.livingAnts);
+  assert.ok(metrics.militaryFoodCost > 0);
+});
+
+test("a combat death always clears the dying ant's food target", () => {
+  const simulation = new Simulation(multiColonyConfig({
+    combatAttackPower: 1000, combatRadius: 10, combatAttackThreshold: 0,
+  }));
+  const [antA, antB] = simulation.colonies.map((colony) => colony.ants[0]);
+  antA.position = { x: 100, y: 50 };
+  antB.position = { x: 102, y: 50 };
+  antB.attackPower = 0;
+  antB.target = new FoodSource({ x: 500, y: 500, quantity: 1, radius: 5 });
+  simulation.tick();
+  assert.equal(antB.state, AntState.DEAD);
+  assert.equal(antB.target, null);
 });

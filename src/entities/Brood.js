@@ -1,3 +1,5 @@
+import { Caste } from "./Ant.js";
+
 export const BroodStage = Object.freeze({
   EGG: "EGG",
   LARVA: "LARVA",
@@ -5,12 +7,13 @@ export const BroodStage = Object.freeze({
 });
 
 export class Brood {
-  constructor({ id }) {
+  constructor({ id, caste = Caste.WORKER }) {
     this.id = id;
     this.age = 0;
     this.stageAge = 0;
     this.stage = BroodStage.EGG;
     this.developmentProgress = 0;
     this.foodConsumed = 0;
+    this.caste = caste;
   }
 }
