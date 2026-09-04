@@ -29,6 +29,11 @@ export const CONFIG_SECTIONS = Object.freeze({
     "explorationStrength", "territoryMinimumInfluence", "territoryContestThreshold",
     "territoryUpdateInterval",
   ]),
+  encounters: Object.freeze([
+    "territoryPheromonesEnabled", "territoryDepositStrength", "territoryFalloffDistance",
+    "territoryEvaporationRate", "territoryDiffusionRate", "territoryMinimumIntensity",
+    "territoryAvoidanceInfluence", "encounterAvoidanceInfluence", "encounterAvoidanceThreshold",
+  ]),
   demography: Object.freeze([
     "initialFoodStock", "reproductionEnabled", "queenLayingCooldownTicks",
     "reproductionFoodThreshold", "eggFoodCost", "maxBrood", "maxWorkers",
@@ -94,7 +99,7 @@ export function validateFlatConfig(config) {
   }
   for (const key of [
     "width", "height", "tickDurationMs", "antMaxEnergy", "territoryUpdateInterval",
-    "pheromoneCellSize", "pheromoneMaxIntensity", "seasonDurationTicks",
+    "pheromoneCellSize", "pheromoneMaxIntensity", "seasonDurationTicks", "territoryFalloffDistance",
   ]) {
     if (config[key] <= 0) fail(key, "doit être positif");
   }
@@ -102,13 +107,15 @@ export function validateFlatConfig(config) {
     "initialAnts", "antSpeed", "energyConsumptionRate", "basalEnergyConsumptionRate", "initialFoodStock",
     "eggFoodCost", "larvaFoodPerTick", "foodRegenerationRate", "foodSpawnProbability",
     "pheromoneMinimumIntensity", "alarmMinimumIntensity", "foreignDetectionRadius",
-    "territoryMinimumInfluence", "territoryContestThreshold",
+    "territoryMinimumInfluence", "territoryContestThreshold", "territoryDepositStrength",
+    "territoryMinimumIntensity", "territoryAvoidanceInfluence", "encounterAvoidanceInfluence",
   ]) {
     if (config[key] < 0) fail(key, "ne peut pas être négatif");
   }
   for (const key of [
     "pheromoneEvaporationRate", "pheromoneDiffusionRate", "alarmEvaporationRate",
     "alarmDiffusionRate", "lowEnergyThreshold", "resumeEnergyThreshold",
+    "territoryEvaporationRate", "territoryDiffusionRate", "encounterAvoidanceThreshold",
   ]) {
     if (config[key] < 0 || config[key] > 1) fail(key, "doit être compris entre 0 et 1");
   }

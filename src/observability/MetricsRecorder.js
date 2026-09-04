@@ -14,8 +14,10 @@ export const RECORDED_METRICS = Object.freeze([
   "foodPheromoneIntensity",
   "homePheromoneIntensity",
   "alarmPheromoneIntensity",
+  "territoryPheromoneIntensity",
   "hazardExposures",
   "foreignContacts",
+  "avoidedContacts",
   "contestedArea",
   "colonies",
 ]);
@@ -45,8 +47,10 @@ export class MetricsRecorder {
       foodPheromoneIntensity: metrics.foodPheromones.total,
       homePheromoneIntensity: metrics.homePheromones.total,
       alarmPheromoneIntensity: metrics.alarmPheromones.total,
+      territoryPheromoneIntensity: metrics.territoryPheromones.total,
       hazardExposures: metrics.dangerExposures,
       foreignContacts: metrics.foreignContacts,
+      avoidedContacts: metrics.avoidedContacts,
       contestedArea: metrics.contestedArea,
       colonies: metrics.colonies.map((colony) => ({
         id: colony.id,
@@ -55,6 +59,7 @@ export class MetricsRecorder {
         foodCollected: colony.resources,
         territoryCells: colony.territoryCells,
         foreignContacts: colony.foreignContacts,
+        avoidedContacts: colony.avoidedContacts,
       })),
     });
   }

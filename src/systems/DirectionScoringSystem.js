@@ -10,6 +10,8 @@ export class DirectionScoringSystem {
   }
 
   suggestDirection(ant, field, options) {
+    const foreignFields = options.foreignFields ?? [];
+    const territoryWeight = options.territoryWeight ?? 0;
     const candidates = [];
     let hasSignal = false;
     let maximumAlarmRepulsion = 0;
@@ -23,13 +25,19 @@ export class DirectionScoringSystem {
       const food = field.sample(PheromoneType.FOOD, position) / field.maxIntensity;
       const home = field.sample(PheromoneType.HOME, position) / field.maxIntensity;
       const alarm = field.sample(PheromoneType.ALARM, position) / field.maxIntensity;
+      let foreignTerritory = 0;
+      for (const foreignField of foreignFields) {
+        const value = foreignField.sample(PheromoneType.TERRITORY, position) / foreignField.maxIntensity;
+        if (value > foreignTerritory) foreignTerritory = value;
+      }
       if ((options.foodWeight > 0 && food >= options.minimumSignal)
         || (options.homeWeight > 0 && home >= options.minimumSignal)
-        || (options.alarmWeight > 0 && alarm >= options.minimumAlarmSignal)) hasSignal = true;
+        || (options.alarmWeight > 0 && alarm >= options.minimumAlarmSignal)
+        || (territoryWeight > 0 && foreignTerritory >= options.minimumSignal)) hasSignal = true;
       const recentlyVisited = ant.recentCells.includes(field.indexAt(position));
       const revisitFactor = recentlyVisited ? options.revisitPenalty : 1;
       const attraction = (food * options.foodWeight + home * options.homeWeight) * revisitFactor;
-      const repulsion = alarm * options.alarmWeight;
+      const repulsion = alarm * options.alarmWeight + foreignTerritory * territoryWeight;
       maximumAlarmRepulsion = Math.max(maximumAlarmRepulsion, repulsion);
       const inertia = Math.cos(angleDifference(direction, ant.direction)) * options.inertiaWeight;
       candidates.push({ direction, attraction, repulsion, inertia });

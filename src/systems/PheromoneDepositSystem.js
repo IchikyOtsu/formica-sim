@@ -3,6 +3,11 @@ import { PheromoneType } from "../simulation/PheromoneField.js";
 
 export class PheromoneDepositSystem {
   deposit(ant, field, options) {
+    if (options.territoryEnabled) {
+      const strength = options.territoryStrength
+        / (1 + ant.distanceSinceNest / options.territoryFalloffDistance);
+      field.deposit(PheromoneType.TERRITORY, ant.position, strength);
+    }
     if (ant.state === AntState.SEARCHING_FOOD && options.homeEnabled) {
       const strength = options.homeStrength / (1 + ant.distanceSinceNest / options.homeFalloffDistance);
       return field.deposit(PheromoneType.HOME, ant.position, strength);

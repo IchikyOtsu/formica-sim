@@ -17,6 +17,7 @@ export class Colony {
     this.totalDistance = 0;
     this.totalPickups = 0;
     this.foreignContacts = 0;
+    this.avoidedContacts = 0;
     this.maxPopulation = 1;
   }
 

@@ -36,6 +36,7 @@ import { PheromoneDepositSystem } from "../src/systems/PheromoneDepositSystem.js
 import { PheromoneSensingSystem } from "../src/systems/PheromoneSensingSystem.js";
 import { MetabolismSystem } from "../src/systems/MetabolismSystem.js";
 import { DirectionScoringSystem } from "../src/systems/DirectionScoringSystem.js";
+import { EncounterReactionSystem, EncounterReaction } from "../src/systems/EncounterReactionSystem.js";
 
 function foragingConfig(overrides = {}) {
   return {
@@ -1363,6 +1364,85 @@ test("territory map exposes controlled and contested cells without affecting beh
   });
   assert.ok(simulation.territoryMap.getStats().contested > 0);
   assert.equal(simulation.colonies[0].ants[0].nearbyForeignAnts.length, 0);
+});
+
+test("TERRITORY is deposited near the nest and decays independently per colony", () => {
+  const simulation = new Simulation(multiColonyConfig());
+  for (let index = 0; index < 20; index += 1) simulation.tick();
+  const territoryA = simulation.colonyPheromones.get("A").getStats(PheromoneType.TERRITORY);
+  const territoryB = simulation.colonyPheromones.get("B").getStats(PheromoneType.TERRITORY);
+  assert.ok(territoryA.total > 0);
+  assert.ok(territoryB.total > 0);
+  const positionNearB = { x: 178, y: 50 };
+  assert.equal(simulation.colonyPheromones.get("A").sample(PheromoneType.TERRITORY, positionNearB), 0);
+});
+
+test("direction scoring avoids a foreign colony's TERRITORY signal before any contact", () => {
+  const ownField = new PheromoneField(100, 100, 5, 100);
+  const foreignField = new PheromoneField(100, 100, 5, 100);
+  const ant = new Ant({
+    id: "SCOUT", position: { x: 50, y: 50 }, direction: 0, speed: 1, colonyId: "A",
+  });
+  foreignField.deposit(PheromoneType.TERRITORY, { x: 70, y: 50 }, 80);
+  const scoring = new DirectionScoringSystem(() => 0.5);
+  const suggestion = scoring.suggestDirection(ant, ownField, {
+    distance: 20,
+    arc: Math.PI,
+    samples: 3,
+    minimumSignal: 0.001,
+    minimumAlarmSignal: 0.001,
+    revisitPenalty: 1,
+    foodWeight: 1,
+    homeWeight: 0,
+    alarmWeight: 0,
+    foreignFields: [foreignField],
+    territoryWeight: 2,
+    inertiaWeight: 0.1,
+    noiseWeight: 0.02,
+    baseInfluence: 0.6,
+  });
+  assert.ok(Math.abs(suggestion.direction) > 1);
+});
+
+test("encounter reaction avoids contact for a low-energy ant and ignores it for a healthy one", () => {
+  const system = new EncounterReactionSystem();
+  const weary = new Ant({ id: "WEARY", position: { x: 0, y: 0 }, direction: 0, speed: 0, colonyId: "A" });
+  weary.energy = weary.maxEnergy * 0.1;
+  weary.nearbyForeignAnts = ["OTHER"];
+  const fresh = new Ant({ id: "FRESH", position: { x: 0, y: 0 }, direction: 0, speed: 0, colonyId: "A" });
+  fresh.nearbyForeignAnts = ["OTHER"];
+  assert.equal(system.evaluate(weary, 0.35), EncounterReaction.AVOID);
+  assert.equal(system.evaluate(fresh, 0.35), EncounterReaction.IGNORE);
+});
+
+test("a low-energy foreign encounter turns the ant away, counts avoidance, and emits an event", () => {
+  const simulation = new Simulation(multiColonyConfig());
+  const [antA, antB] = simulation.colonies.map((colony) => colony.ants[0]);
+  antA.position = { x: 100, y: 50 };
+  antB.position = { x: 105, y: 50 };
+  antA.energy = antA.maxEnergy * 0.1;
+  antB.energy = antB.maxEnergy * 0.1;
+  const directionBefore = antA.direction;
+  simulation.tick();
+  assert.equal(simulation.getMetrics().avoidedContacts, 2);
+  assert.equal(simulation.getColonyMetrics("A").avoidedContacts, 1);
+  assert.equal(simulation.getColonyMetrics("B").avoidedContacts, 1);
+  assert.notEqual(antA.direction, directionBefore);
+  assert.ok(simulation.tickEvents.some((event) => (
+    event.type === "FOREIGN_AVOIDANCE" && event.colonyId === "A"
+  )));
+  assert.ok(simulation.tickEvents.some((event) => (
+    event.type === "FOREIGN_AVOIDANCE" && event.colonyId === "B"
+  )));
+});
+
+test("a full-energy single foreign contact is ignored and not counted as avoidance", () => {
+  const simulation = new Simulation(multiColonyConfig());
+  const [antA, antB] = simulation.colonies.map((colony) => colony.ants[0]);
+  antA.position = { x: 100, y: 50 };
+  antB.position = { x: 105, y: 50 };
+  simulation.tick();
+  assert.equal(simulation.getMetrics().avoidedContacts, 0);
 });
 
 test("multi-colony replay and global food conservation are exact", async () => {

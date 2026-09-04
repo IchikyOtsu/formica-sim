@@ -24,6 +24,7 @@ import { HomeDetectionSystem } from "../systems/HomeDetectionSystem.js";
 import { PheromoneDepositSystem } from "../systems/PheromoneDepositSystem.js";
 import { PheromoneSensingSystem } from "../systems/PheromoneSensingSystem.js";
 import { ForeignAntDetectionSystem } from "../systems/ForeignAntDetectionSystem.js";
+import { EncounterReactionSystem, EncounterReaction } from "../systems/EncounterReactionSystem.js";
 import { normalizeConfig, toVersionedConfig } from "../config/ConfigSchema.js";
 import { DEFAULT_CONFIG } from "./SimulationConfig.js";
 import { ColonyPheromoneFields } from "./ColonyPheromoneFields.js";
@@ -66,6 +67,7 @@ export class Simulation {
     this.environment = new EnvironmentSystem();
     this.hazard = new HazardSystem();
     this.foreignAntDetection = new ForeignAntDetectionSystem();
+    this.encounterReaction = new EncounterReactionSystem();
     this.reset();
   }
 
@@ -176,6 +178,7 @@ export class Simulation {
     this.tickEvents = [];
     this.previousForeignContacts = new Set();
     this.foreignContacts = 0;
+    this.avoidedContacts = 0;
 
     for (const colony of this.colonies) {
       const colonyConfig = this.colonyConfigs.get(colony.id);
@@ -257,6 +260,14 @@ export class Simulation {
           diffusionRate: this.config.alarmDiffusionRate,
           minimumIntensity: this.config.alarmMinimumIntensity,
           types: [PheromoneType.ALARM],
+        });
+      }
+      if (this.config.territoryPheromonesEnabled) {
+        for (const field of this.colonyPheromones.values()) field.update({
+          evaporationRate: this.config.territoryEvaporationRate,
+          diffusionRate: this.config.territoryDiffusionRate,
+          minimumIntensity: this.config.territoryMinimumIntensity,
+          types: [PheromoneType.TERRITORY],
         });
       }
     }
@@ -560,8 +571,27 @@ export class Simulation {
         foreignColonyId: secondColony.id,
         foreignAntId: contact.second.id,
       });
+      this.applyEncounterReaction(contact.first, firstColony);
+      this.applyEncounterReaction(contact.second, secondColony);
     }
     this.previousForeignContacts = current;
+  }
+
+  applyEncounterReaction(ant, colony) {
+    const reaction = this.encounterReaction.evaluate(ant, this.config.encounterAvoidanceThreshold);
+    if (reaction !== EncounterReaction.AVOID) return;
+    const otherId = ant.nearbyForeignAnts[0];
+    const other = this.colonies
+      .flatMap((candidate) => candidate.ants)
+      .find((candidate) => candidate.id === otherId);
+    if (other) {
+      const dx = ant.position.x - other.position.x;
+      const dy = ant.position.y - other.position.y;
+      ant.direction = (dx === 0 && dy === 0) ? ant.direction : Math.atan2(dy, dx);
+    }
+    this.avoidedContacts += 1;
+    colony.avoidedContacts += 1;
+    this.emitEvent("FOREIGN_AVOIDANCE", { colonyId: colony.id, antId: ant.id });
   }
 
   spawnWorker(colony = this.colony) {
@@ -608,6 +638,11 @@ export class Simulation {
     const field = this.colonyPheromones.get(ant.colonyId);
     if (!config.pheromonesEnabled) return null;
     const returning = state === AntState.RETURNING_HOME;
+    const foreignFields = this.colonies.length > 1 && config.territoryPheromonesEnabled
+      ? this.colonies
+        .filter((colony) => colony.id !== ant.colonyId)
+        .map((colony) => this.colonyPheromones.get(colony.id))
+      : [];
     return this.directionScoring.suggestDirection(ant, field, {
       distance: config.pheromoneSenseDistance,
       arc: config.pheromoneSenseArc,
@@ -622,6 +657,8 @@ export class Simulation {
         ? config.homeTrailInfluence
         : 0,
       alarmWeight: config.alarmPheromonesEnabled ? config.alarmInfluence : 0,
+      foreignFields,
+      territoryWeight: config.territoryAvoidanceInfluence,
       inertiaWeight: config.navigationInertia,
       noiseWeight: config.navigationNoise,
       baseInfluence: returning ? config.homeTrailInfluence : config.pheromoneInfluence,
@@ -636,6 +673,9 @@ export class Simulation {
       foodStrength: config.foodDepositStrength,
       homeStrength: config.homeDepositStrength,
       homeFalloffDistance: config.homeFalloffDistance,
+      territoryEnabled: config.territoryPheromonesEnabled,
+      territoryStrength: config.territoryDepositStrength,
+      territoryFalloffDistance: config.territoryFalloffDistance,
     });
   }
 
@@ -702,6 +742,7 @@ export class Simulation {
     const foodPheromones = field.getStats(PheromoneType.FOOD);
     const homePheromones = field.getStats(PheromoneType.HOME);
     const alarmPheromones = field.getStats(PheromoneType.ALARM);
+    const territoryPheromones = field.getStats(PheromoneType.TERRITORY);
     const livingAnts = colony.ants.filter((ant) => ant.state !== AntState.DEAD);
     const energies = livingAnts.map((ant) => ant.energy);
     const broodCounts = {
@@ -759,10 +800,12 @@ export class Simulation {
       totalDistance: colony.totalDistance,
       totalPickups: colony.totalPickups,
       foreignContacts: colony.foreignContacts,
+      avoidedContacts: colony.avoidedContacts,
       territoryCells: this.territoryMap.getStats().controlled[colony.id] ?? 0,
       foodPheromones,
       homePheromones,
       alarmPheromones,
+      territoryPheromones,
     };
   }
 
@@ -788,6 +831,7 @@ export class Simulation {
     const foodPheromones = combinePheromones("foodPheromones");
     const homePheromones = combinePheromones("homePheromones");
     const alarmPheromones = combinePheromones("alarmPheromones");
+    const territoryPheromones = combinePheromones("territoryPheromones");
     const totals = (key) => colonies.reduce((sum, colony) => sum + colony[key], 0);
     const averageConsumptionPerTick = this.consumptionWindow.length === 0
       ? 0
@@ -859,18 +903,22 @@ export class Simulation {
       expiredFood: this.expiredFood,
       carriedFood: totals("carriedFood"),
       carryingAnts: totals("carryingAnts"),
-      pheromoneTotal: foodPheromones.total + homePheromones.total + alarmPheromones.total,
+      pheromoneTotal: foodPheromones.total + homePheromones.total + alarmPheromones.total
+        + territoryPheromones.total,
       pheromoneCells: foodPheromones.activeCells
         + homePheromones.activeCells
-        + alarmPheromones.activeCells,
+        + alarmPheromones.activeCells
+        + territoryPheromones.activeCells,
       pheromoneMaximum: Math.max(
         foodPheromones.maximum,
         homePheromones.maximum,
         alarmPheromones.maximum,
+        territoryPheromones.maximum,
       ),
       foodPheromones,
       homePheromones,
       alarmPheromones,
+      territoryPheromones,
       completionTick: this.completionTick,
       totalDistance: this.totalDistance,
       totalPickups: this.totalPickups,
@@ -884,6 +932,7 @@ export class Simulation {
       colonies,
       colonyCount: colonies.length,
       foreignContacts: this.foreignContacts,
+      avoidedContacts: this.avoidedContacts,
       territory,
       contestedArea: territory.contested,
       elapsedMs: this.elapsedMs,
