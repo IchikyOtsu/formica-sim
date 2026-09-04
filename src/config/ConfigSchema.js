@@ -39,7 +39,7 @@ export const CONFIG_SECTIONS = Object.freeze({
     "combatAttackCooldownTicks", "combatAttackEnergyCost", "combatDamageRandomMin",
     "combatDamageRandomMax", "combatThreatenThreshold", "combatAttackThreshold",
     "combatFleeHealthRatio", "combatThreatenAlarmStrength", "combatThreatenTerritoryStrength",
-    "combatDeathAlarmStrength",
+    "combatDeathAlarmStrength", "combatNumbersAdvantageWeight", "combatTerritorialAdvantageWeight",
   ]),
   demography: Object.freeze([
     "initialFoodStock", "reproductionEnabled", "queenLayingCooldownTicks",
@@ -119,6 +119,7 @@ export function validateFlatConfig(config) {
     "territoryMinimumIntensity", "territoryAvoidanceInfluence", "encounterAvoidanceInfluence",
     "combatAttackPower", "combatAttackEnergyCost", "combatDamageRandomMin", "combatDamageRandomMax",
     "combatThreatenAlarmStrength", "combatThreatenTerritoryStrength", "combatDeathAlarmStrength",
+    "combatNumbersAdvantageWeight", "combatTerritorialAdvantageWeight",
   ]) {
     if (config[key] < 0) fail(key, "ne peut pas être négatif");
   }

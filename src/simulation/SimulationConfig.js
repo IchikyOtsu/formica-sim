@@ -99,6 +99,8 @@ export const DEFAULT_CONFIG = Object.freeze({
   combatThreatenThreshold: 0.4,
   combatAttackThreshold: 0.65,
   combatFleeHealthRatio: 0.3,
+  combatNumbersAdvantageWeight: 0.25,
+  combatTerritorialAdvantageWeight: 0.15,
   combatThreatenAlarmStrength: 0.6,
   combatThreatenTerritoryStrength: 0.4,
   combatDeathAlarmStrength: 22,

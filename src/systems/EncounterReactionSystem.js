@@ -22,13 +22,19 @@ export class EncounterReactionSystem {
       : EncounterReaction.IGNORE;
   }
 
-  computeAggression(ant, { allyCount = 0, enemyCount = 0, territorialAdvantage = 0 } = {}) {
+  computeAggression(ant, {
+    allyCount = 0,
+    enemyCount = 0,
+    territorialAdvantage = 0,
+    numbersWeight = 0.25,
+    territoryWeight = 0.15,
+  } = {}) {
     const healthConfidence = ant.health / ant.maxHealth;
     const energyConfidence = ant.energy / ant.maxEnergy;
     const numbersAdvantage = clamp((allyCount - enemyCount) / 3, -1, 1);
     return clamp(
-      healthConfidence * 0.35 + energyConfidence * 0.25 + numbersAdvantage * 0.25
-        + clamp(territorialAdvantage, -1, 1) * 0.15,
+      healthConfidence * 0.35 + energyConfidence * 0.25 + numbersAdvantage * numbersWeight
+        + clamp(territorialAdvantage, -1, 1) * territoryWeight,
       0,
       1,
     );
@@ -38,6 +44,8 @@ export class EncounterReactionSystem {
     allyCount = 0,
     enemyCount = 0,
     territorialAdvantage = 0,
+    numbersWeight,
+    territoryWeight,
     threatenThreshold,
     attackThreshold,
     fleeHealthRatio,
@@ -47,7 +55,9 @@ export class EncounterReactionSystem {
     if (healthRatio < fleeHealthRatio || energyRatio < ant.lowEnergyThreshold) {
       return EncounterReaction.AVOID;
     }
-    const aggression = this.computeAggression(ant, { allyCount, enemyCount, territorialAdvantage });
+    const aggression = this.computeAggression(ant, {
+      allyCount, enemyCount, territorialAdvantage, numbersWeight, territoryWeight,
+    });
     if (ant.combatCooldown > 0) {
       return aggression >= threatenThreshold ? EncounterReaction.THREATEN : EncounterReaction.IGNORE;
     }

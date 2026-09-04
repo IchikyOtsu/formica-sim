@@ -677,6 +677,8 @@ export class Simulation {
           allyCount,
           enemyCount: ant.nearbyForeignAnts.length,
           territorialAdvantage: ownInfluence - foreignInfluence,
+          numbersWeight: colonyConfig.combatNumbersAdvantageWeight,
+          territoryWeight: colonyConfig.combatTerritorialAdvantageWeight,
           threatenThreshold: colonyConfig.combatThreatenThreshold,
           attackThreshold: colonyConfig.combatAttackThreshold,
           fleeHealthRatio: colonyConfig.combatFleeHealthRatio,
