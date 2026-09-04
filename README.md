@@ -1,9 +1,9 @@
 # Formica Sim
 
 Un petit laboratoire visuel pour observer une colonie de fourmis dans un monde
-2D. La V0.9 transforme le simulateur en outil expérimental : historique borné,
-graphiques, événements structurants, exports JSON/CSV, presets reproductibles,
-replay déterministe et infrastructure commune pour les benchmarks.
+2D. La V1.0 stabilise le moteur expérimental : API publique sans Canvas, schéma
+de configuration versionné, invariants, scénario de référence à 50 000 ticks,
+replay déterministe, documentation scientifique et pause sur événement.
 
 ## Lancer le projet
 
@@ -20,6 +20,40 @@ Puis ouvrir <http://localhost:4173>.
 ```bash
 npm test
 ```
+
+Validation V1.0 complète et scénario officiel :
+
+```bash
+npm run validate
+npm run validate:reference
+```
+
+## API moteur V1
+
+```js
+import { Simulation } from "./src/index.js";
+
+const simulation = new Simulation(config, 1847);
+simulation.tick();
+simulation.run(10_000);
+const state = simulation.getState();
+```
+
+Le moteur n'a besoin ni du DOM ni du Canvas. Les configurations exportées
+utilisent `schemaVersion: 1` et les sections `simulation`, `ants`, `metabolism`,
+`pheromones`, `demography`, `environment`, `hazards` et `analytics`.
+
+## Documentation
+
+- [Architecture](docs/architecture.md)
+- [Modèle et simplifications](docs/simulation-model.md)
+- [Phéromones](docs/pheromones.md)
+- [Métabolisme](docs/metabolism.md)
+- [Démographie](docs/demography.md)
+- [Environnement](docs/environment.md)
+- [Déterminisme et invariants](docs/determinism.md)
+- [Expériences](docs/experiments.md)
+- [Replay et inspection](docs/replay.md)
 
 Comparer danger sans alarme, puis alarme faible, équilibrée et forte :
 
@@ -62,8 +96,9 @@ npm run experiment -- environment --seeds=20 --ticks=40000
 
 ```text
 src/
+├── config/ConfigSchema.js
 ├── observability/{TimeSeries,MetricsRecorder,EventLog,RunSummary}.js
-├── observability/{RunExporter,ReplayController,TimeSeriesRenderer}.js
+├── observability/{RunExporter,ReplayController,TimeSeriesRenderer,PauseConditions}.js
 ├── behaviors/{RandomWalk,SearchFoodBehavior,ReturnHomeBehavior}.js
 ├── entities/{Ant,Colony,FoodSource,Nest,Queen,Brood}.js
 ├── environment/{Season,EnvironmentConfig,DangerZone}.js
@@ -77,6 +112,7 @@ src/
 ├── systems/{EnvironmentSystem,FoodSpawnSystem,HazardSystem}.js
 ├── systems/{AlarmDepositSystem,DirectionScoringSystem}.js
 ├── main.js
+├── index.js
 └── styles.css
 ```
 

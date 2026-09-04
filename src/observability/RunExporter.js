@@ -1,4 +1,5 @@
 import { createRunSummary } from "./RunSummary.js";
+import { toVersionedConfig } from "../config/ConfigSchema.js";
 
 function csvCell(value) {
   const text = String(value ?? "");
@@ -16,7 +17,11 @@ function runId(version, seed, duration, config) {
 }
 
 export function createRunExport({ simulation, recorder, eventLog, version }) {
-  const config = structuredClone(simulation.config);
+  const config = toVersionedConfig(simulation.config, {
+    sampleInterval: recorder.sampleInterval,
+    maxSamples: recorder.series.maxSamples,
+    maxEvents: eventLog.maxEvents,
+  });
   return {
     format: "formica-run",
     version,

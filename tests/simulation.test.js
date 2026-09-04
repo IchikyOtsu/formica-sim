@@ -5,6 +5,7 @@ import { MetricsRecorder } from "../src/observability/MetricsRecorder.js";
 import { ReplayController } from "../src/observability/ReplayController.js";
 import { createRunExport, seriesToCsv } from "../src/observability/RunExporter.js";
 import { TimeSeries } from "../src/observability/TimeSeries.js";
+import { evaluatePauseConditions } from "../src/observability/PauseConditions.js";
 import { SearchFoodBehavior } from "../src/behaviors/SearchFoodBehavior.js";
 import { ReturnHomeBehavior } from "../src/behaviors/ReturnHomeBehavior.js";
 import { Ant, AntState } from "../src/entities/Ant.js";
@@ -18,6 +19,12 @@ import { PheromoneField, PheromoneType } from "../src/simulation/PheromoneField.
 import { Renderer } from "../src/rendering/Renderer.js";
 import { Simulation } from "../src/simulation/Simulation.js";
 import { DEFAULT_CONFIG } from "../src/simulation/SimulationConfig.js";
+import {
+  CONFIG_SECTIONS,
+  normalizeConfig,
+  toVersionedConfig,
+} from "../src/config/ConfigSchema.js";
+import { assertSimulationInvariants, inspectSimulationInvariants } from "../src/simulation/Invariants.js";
 import { World } from "../src/simulation/World.js";
 import { FoodDetectionSystem } from "../src/systems/FoodDetectionSystem.js";
 import { EnvironmentSystem } from "../src/systems/EnvironmentSystem.js";
@@ -1088,7 +1095,8 @@ test("JSON and CSV exports contain reproducible configuration and sampled series
   assert.equal(exported.seed, simulation.config.seed);
   assert.equal(exported.duration, 1);
   assert.equal(exported.series.length, 2);
-  assert.deepEqual(exported.config, simulation.config);
+  assert.equal(exported.config.schemaVersion, 1);
+  assert.deepEqual(normalizeConfig(exported.config), simulation.config);
   const csv = seriesToCsv(exported.series);
   assert.match(csv, /^tick,population,foodStock/);
   assert.equal(csv.trim().split("\n").length, 3);
@@ -1117,7 +1125,7 @@ test("the common experiment runner returns standard summaries, series, and event
   assert.ok(result.events.some((event) => event.type === "SEASON_CHANGED"));
 });
 
-test("analytics observation does not alter deterministic simulation results", () => {
+test("observability does not alter deterministic simulation results", () => {
   const observed = new Simulation();
   const control = new Simulation();
   const recorder = new MetricsRecorder({ sampleInterval: 5 });
@@ -1133,6 +1141,61 @@ test("analytics observation does not alter deterministic simulation results", ()
     observed.pheromoneField.layer(PheromoneType.ALARM),
     control.pheromoneField.layer(PheromoneType.ALARM),
   );
+});
+
+test("versioned configuration round-trips every engine setting", () => {
+  const versioned = toVersionedConfig(foragingConfig(), { sampleInterval: 25 });
+  assert.equal(versioned.schemaVersion, 1);
+  assert.equal(versioned.analytics.sampleInterval, 25);
+  assert.deepEqual(normalizeConfig(versioned), new Simulation(foragingConfig()).config);
+  const mappedKeys = Object.values(CONFIG_SECTIONS).flat().sort();
+  assert.deepEqual(mappedKeys, Object.keys(DEFAULT_CONFIG).sort());
+});
+
+test("configuration validation rejects unknown schemas and invalid values", () => {
+  const versioned = toVersionedConfig(DEFAULT_CONFIG);
+  assert.throws(() => normalizeConfig({ ...versioned, schemaVersion: 2 }), /non prise en charge/);
+  assert.throws(() => normalizeConfig({ ...versioned, surprise: {} }), /section inconnue/);
+  assert.throws(() => normalizeConfig({ ...versioned, analytics: null }), /analytics/);
+  assert.throws(() => normalizeConfig({ ...DEFAULT_CONFIG, width: 0 }), /width/);
+  assert.throws(() => normalizeConfig({ ...DEFAULT_CONFIG, dangerZones: "danger" }), /dangerZones/);
+});
+
+test("public engine API runs headlessly with an explicit seed and immutable snapshots", () => {
+  const simulation = new Simulation(foragingConfig(), 991);
+  assert.equal(simulation.config.seed, 991);
+  assert.equal(simulation.run(12), simulation);
+  assert.equal(simulation.tickCount, 12);
+  const state = simulation.getState();
+  assert.equal(state.tick, 12);
+  assert.equal(state.config.schemaVersion, 1);
+  state.colony.foodStock = -100;
+  state.pheromones.FOOD[0] = -100;
+  assert.notEqual(simulation.colony.foodStock, -100);
+  assert.notEqual(simulation.pheromoneField.layer(PheromoneType.FOOD)[0], -100);
+  assert.throws(() => simulation.run(-1), /non-negative integer/);
+});
+
+test("engine invariants hold through a dynamic run and report corruption", () => {
+  const simulation = new Simulation();
+  simulation.run(2_000);
+  assert.equal(assertSimulationInvariants(simulation).valid, true);
+  simulation.colony.foodStock = -1;
+  const report = inspectSimulationInvariants(simulation);
+  assert.equal(report.valid, false);
+  assert.ok(report.violations.some(({ name }) => name === "non-negative-food-stock"));
+});
+
+test("pause conditions identify events and numeric thresholds deterministically", () => {
+  const metrics = { livingAnts: 8, broodSize: 2, totalPopulation: 11, foodStock: 3 };
+  assert.equal(evaluatePauseConditions(
+    [{ type: "SEASON_CHANGED" }],
+    metrics,
+    { season: true, stock: null },
+  ), "changement de saison");
+  assert.equal(evaluatePauseConditions([], metrics, { population: 10, stock: null }), "population ≥ 10");
+  assert.equal(evaluatePauseConditions([], metrics, { stock: 4 }), "stock ≤ 4");
+  assert.equal(evaluatePauseConditions([], metrics, { stock: null }), null);
 });
 
 test("replay reconstructs an exact tick from seed and configuration", async () => {

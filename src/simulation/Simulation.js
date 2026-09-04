@@ -23,6 +23,7 @@ import { HazardSystem } from "../systems/HazardSystem.js";
 import { HomeDetectionSystem } from "../systems/HomeDetectionSystem.js";
 import { PheromoneDepositSystem } from "../systems/PheromoneDepositSystem.js";
 import { PheromoneSensingSystem } from "../systems/PheromoneSensingSystem.js";
+import { normalizeConfig, toVersionedConfig } from "../config/ConfigSchema.js";
 import { DEFAULT_CONFIG } from "./SimulationConfig.js";
 import { PheromoneField, PheromoneType } from "./PheromoneField.js";
 import { World } from "./World.js";
@@ -49,8 +50,8 @@ function deterministicEventRoll(seed, tick, antId, zoneId) {
 }
 
 export class Simulation {
-  constructor(config = DEFAULT_CONFIG) {
-    this.config = config;
+  constructor(config = DEFAULT_CONFIG, seed) {
+    this.config = normalizeConfig(config, seed);
     this.movement = new MovementSystem();
     this.foodDetection = new FoodDetectionSystem();
     this.foodCollection = new FoodCollectionSystem();
@@ -64,8 +65,8 @@ export class Simulation {
     this.reset();
   }
 
-  reconfigure(config) {
-    this.config = config;
+  reconfigure(config, seed) {
+    this.config = normalizeConfig(config, seed);
     this.reset();
   }
 
@@ -128,6 +129,7 @@ export class Simulation {
     this.exploredCells = new Set();
     this.lostFood = 0;
     this.regeneratedFood = 0;
+    this.spawnedFood = 0;
     this.expiredFood = 0;
     this.starvationDeaths = 0;
     this.environmentalDeaths = 0;
@@ -179,6 +181,7 @@ export class Simulation {
         this.currentEnvironment.foodRegenerationMultiplier,
       );
       this.regeneratedFood += foodUpdate.regenerated;
+      this.spawnedFood += foodUpdate.spawnedFood;
       this.expiredFood += foodUpdate.expiredFood;
       for (const event of foodUpdate.events) this.emitEvent(event.type, event);
     } else {
@@ -499,6 +502,37 @@ export class Simulation {
     if (ant.recentCells.length > this.config.recentCellMemory) ant.recentCells.shift();
   }
 
+  run(ticks, { stopWhen = () => false, onTick = () => {} } = {}) {
+    if (!Number.isInteger(ticks) || ticks < 0) {
+      throw new TypeError("ticks must be a non-negative integer");
+    }
+    const target = this.tickCount + ticks;
+    while (this.tickCount < target && !stopWhen(this)) {
+      this.tick();
+      onTick(this);
+    }
+    return this;
+  }
+
+  getState() {
+    const clone = (value) => JSON.parse(JSON.stringify(value));
+    return {
+      schemaVersion: 1,
+      tick: this.tickCount,
+      elapsedMs: this.elapsedMs,
+      config: toVersionedConfig(this.config),
+      colony: clone(this.colony),
+      foodSources: clone(this.foodSources),
+      dangerZones: clone(this.dangerZones),
+      environment: clone(this.currentEnvironment),
+      pheromones: Object.fromEntries(Object.values(PheromoneType).map((type) => [
+        type,
+        Array.from(this.pheromoneField.layer(type)),
+      ])),
+      metrics: this.getMetrics(),
+    };
+  }
+
   getMetrics() {
     const foodPheromones = this.pheromoneField.getStats(PheromoneType.FOOD);
     const homePheromones = this.pheromoneField.getStats(PheromoneType.HOME);
@@ -577,6 +611,7 @@ export class Simulation {
         : this.colony.resources / this.colony.consumedFood,
       lostFood: this.lostFood,
       regeneratedFood: this.regeneratedFood,
+      spawnedFood: this.spawnedFood,
       expiredFood: this.expiredFood,
       carriedFood: this.colony.ants.reduce(
         (total, ant) => total + ant.carryingFoodAmount,

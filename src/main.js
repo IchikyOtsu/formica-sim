@@ -3,13 +3,15 @@ import { MetricsRecorder } from "./observability/MetricsRecorder.js";
 import { ReplayController } from "./observability/ReplayController.js";
 import { createRunExport, downloadText, seriesToCsv } from "./observability/RunExporter.js";
 import { TimeSeriesRenderer } from "./observability/TimeSeriesRenderer.js";
+import { evaluatePauseConditions } from "./observability/PauseConditions.js";
 import { SCENARIO_PRESETS, configForPreset } from "./experiments/ScenarioPresets.js";
+import { analyticsConfigFrom, toVersionedConfig } from "./config/ConfigSchema.js";
 import { Renderer } from "./rendering/Renderer.js";
 import { Simulation } from "./simulation/Simulation.js";
 import { DEFAULT_CONFIG } from "./simulation/SimulationConfig.js";
 
 const simulation = new Simulation();
-const APP_VERSION = "0.9.2";
+const APP_VERSION = "1.0.0";
 const renderer = new Renderer(document.querySelector("#world"));
 const playPause = document.querySelector("#play-pause");
 const buttonText = playPause.querySelector(".button-text");
@@ -83,6 +85,13 @@ const elements = {
   replayTick: document.querySelector("#replay-tick"),
   replayStatus: document.querySelector("#replay-status"),
   preset: document.querySelector("#scenario-preset"),
+  pauseDeath: document.querySelector("#pause-death"),
+  pauseDepletion: document.querySelector("#pause-depletion"),
+  pauseSeason: document.querySelector("#pause-season"),
+  pauseExtinction: document.querySelector("#pause-extinction"),
+  pausePopulation: document.querySelector("#pause-population"),
+  pauseStock: document.querySelector("#pause-stock"),
+  pauseReason: document.querySelector("#pause-reason"),
 };
 
 const charts = [...document.querySelectorAll(".chart")].map((canvas) => (
@@ -104,6 +113,25 @@ function resetAnalytics() {
 function observeTick() {
   recorder.record(simulation);
   eventLog.capture(simulation.tickEvents);
+  if (running) inspectPauseConditions();
+}
+
+function inspectPauseConditions() {
+  const metrics = simulation.getMetrics();
+  const reason = evaluatePauseConditions(simulation.tickEvents, metrics, {
+    death: elements.pauseDeath.checked,
+    depletion: elements.pauseDepletion.checked,
+    season: elements.pauseSeason.checked,
+    extinction: elements.pauseExtinction.checked,
+    population: elements.pausePopulation.value === ""
+      ? null
+      : Number(elements.pausePopulation.value),
+    stock: elements.pauseStock.value === "" ? null : Number(elements.pauseStock.value),
+  });
+  if (reason) {
+    setRunning(false);
+    elements.pauseReason.textContent = `Pause au tick ${simulation.tickCount} : ${reason}`;
+  }
 }
 
 function formatTime(milliseconds) {
@@ -208,7 +236,7 @@ function frame(now) {
   try {
     if (running) {
       accumulator += frameDelta * speed;
-      while (accumulator >= simulation.config.tickDurationMs) {
+      while (running && accumulator >= simulation.config.tickDurationMs) {
         simulation.tick();
         observeTick();
         accumulator -= simulation.config.tickDurationMs;
@@ -260,6 +288,7 @@ document.querySelector("#reset").addEventListener("click", () => {
   simulation.reset();
   resetAnalytics();
   accumulator = 0;
+  elements.pauseReason.textContent = "En attente d’un événement";
   updateMetrics();
 });
 
@@ -348,18 +377,13 @@ function applyConfigToForm(config) {
 }
 
 function loadConfiguration(config) {
-  const normalized = structuredClone({ ...DEFAULT_CONFIG, ...config });
-  if (!Number.isFinite(normalized.seed)
-    || normalized.width <= 0
-    || normalized.height <= 0
-    || !Array.isArray(normalized.foodSources)
-    || !Array.isArray(normalized.dangerZones)) {
-    throw new Error("Configuration Formica invalide");
-  }
-  simulation.reconfigure(normalized);
-  applyConfigToForm(normalized);
+  const analytics = analyticsConfigFrom(config);
+  simulation.reconfigure(config);
+  applyConfigToForm(simulation.config);
+  elements.sampleInterval.value = analytics.sampleInterval;
   resetAnalytics();
   accumulator = 0;
+  elements.pauseReason.textContent = "En attente d’un événement";
   updateMetrics();
 }
 
@@ -370,10 +394,12 @@ for (const preset of SCENARIO_PRESETS) {
   option.title = preset.description;
   elements.preset.append(option);
 }
-elements.preset.value = "balanced-alarm";
+elements.preset.value = "reference-v1";
 
 document.querySelector("#apply-preset").addEventListener("click", () => {
   loadConfiguration(configForPreset(elements.preset.value));
+  const preset = SCENARIO_PRESETS.find((candidate) => candidate.id === elements.preset.value);
+  if (preset?.duration) elements.replayTick.value = preset.duration;
 });
 
 document.querySelector("#export-run-json").addEventListener("click", () => {
@@ -400,7 +426,11 @@ document.querySelector("#export-config").addEventListener("click", () => {
       format: "formica-config",
       version: APP_VERSION,
       seed: simulation.config.seed,
-      config: simulation.config,
+      config: toVersionedConfig(simulation.config, {
+        sampleInterval: recorder.sampleInterval,
+        maxSamples: recorder.series.maxSamples,
+        maxEvents: eventLog.maxEvents,
+      }),
     }, null, 2),
     "application/json",
   );

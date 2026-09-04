@@ -2,6 +2,21 @@ import { DEFAULT_CONFIG } from "../simulation/SimulationConfig.js";
 
 export const SCENARIO_PRESETS = Object.freeze([
   {
+    id: "reference-v1",
+    name: "Référence V1.0",
+    description: "Scénario officiel : 50 ouvrières, saisons modérées et ALARM équilibrée.",
+    seed: 1847,
+    duration: 50_000,
+    config: {
+      initialAnts: 50,
+      reproductionEnabled: true,
+      environmentEnabled: true,
+      environmentSeverity: 1,
+      alarmPheromonesEnabled: true,
+      alarmInfluence: 1.2,
+    },
+  },
+  {
     id: "stable",
     name: "Stable",
     description: "Ressources fixes, pression environnementale neutralisée.",
@@ -79,4 +94,8 @@ export function configForPreset(id) {
   const preset = SCENARIO_PRESETS.find((candidate) => candidate.id === id);
   if (!preset) throw new Error(`Unknown scenario preset: ${id}`);
   return structuredClone({ ...DEFAULT_CONFIG, ...preset.config, seed: preset.seed });
+}
+
+export function presetById(id) {
+  return SCENARIO_PRESETS.find((candidate) => candidate.id === id) ?? null;
 }

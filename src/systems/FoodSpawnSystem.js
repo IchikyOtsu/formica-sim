@@ -8,6 +8,7 @@ export class FoodSpawnSystem {
 
   update(foodSources, world, config, regenerationMultiplier) {
     let regenerated = 0;
+    let spawnedFood = 0;
     let expiredFood = 0;
     const events = [];
     for (const source of foodSources) {
@@ -23,6 +24,7 @@ export class FoodSpawnSystem {
           source.startCooldown(config.foodRespawnDelayTicks);
         }
       } else if (source.state === FoodSourceState.DEPLETED) {
+        expiredFood += source.quantity;
         source.startCooldown(config.foodRespawnDelayTicks);
       } else if (source.state === FoodSourceState.COOLDOWN) {
         source.cooldownRemaining = Math.max(0, source.cooldownRemaining - 1);
@@ -36,11 +38,13 @@ export class FoodSpawnSystem {
         (source) => source.state === FoodSourceState.COOLDOWN && source.cooldownRemaining === 0,
       );
       if (reusable) {
+        const quantity = this.randomQuantity(config);
         reusable.spawn(
           this.randomPosition(world, config.foodSpawnMargin),
-          this.randomQuantity(config),
+          quantity,
           config.foodSourceRadius,
         );
+        spawnedFood += quantity;
         events.push({
           type: "FOOD_SOURCE_RESPAWNED",
           sourceId: reusable.id,
@@ -51,6 +55,7 @@ export class FoodSpawnSystem {
       } else if (foodSources.length < config.maxActiveSources) {
         const source = this.createSource(world, config);
         foodSources.push(source);
+        spawnedFood += source.quantity;
         events.push({
           type: "FOOD_SOURCE_SPAWNED",
           sourceId: source.id,
@@ -60,7 +65,7 @@ export class FoodSpawnSystem {
         });
       }
     }
-    return { regenerated, expiredFood, events };
+    return { regenerated, spawnedFood, expiredFood, events };
   }
 
   createSource(world, config) {
