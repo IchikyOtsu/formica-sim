@@ -1,4 +1,4 @@
-import { Simulation } from "../src/simulation/Simulation.js";
+import { ExperimentRunner } from "../src/experiments/ExperimentRunner.js";
 import { DEFAULT_CONFIG } from "../src/simulation/SimulationConfig.js";
 
 const argument = (name, fallback) => {
@@ -8,6 +8,7 @@ const argument = (name, fallback) => {
 
 const seedCount = Math.max(1, argument("seeds", 1));
 const duration = Math.max(1, argument("ticks", 30_000));
+const runner = new ExperimentRunner();
 
 const experiments = [
   { name: "A — dangers, ALARM désactivée", enabled: false, influence: 0 },
@@ -24,7 +25,8 @@ const experiments = [
 ];
 
 function run(experiment, seed) {
-  const simulation = new Simulation({
+  const result = runner.run({
+    config: {
     ...DEFAULT_CONFIG,
     seed,
     reproductionEnabled: false,
@@ -40,9 +42,10 @@ function run(experiment, seed) {
       ?? DEFAULT_CONFIG.alarmDamageDepositStrength,
     alarmDeathDepositStrength: experiment.alarmDeathDepositStrength
       ?? DEFAULT_CONFIG.alarmDeathDepositStrength,
+    },
+    ticks: duration,
   });
-  for (let index = 0; index < duration; index += 1) simulation.tick();
-  const metrics = simulation.getMetrics();
+  const { metrics } = result;
   return {
     livingWorkers: metrics.livingAnts,
     environmentalDeaths: metrics.environmentalDeaths,

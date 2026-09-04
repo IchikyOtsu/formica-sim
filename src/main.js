@@ -1,7 +1,15 @@
+import { EventLog } from "./analytics/EventLog.js";
+import { MetricsRecorder } from "./analytics/MetricsRecorder.js";
+import { ReplayController } from "./analytics/ReplayController.js";
+import { createRunExport, downloadText, seriesToCsv } from "./analytics/RunExporter.js";
+import { TimeSeriesRenderer } from "./analytics/TimeSeriesRenderer.js";
+import { SCENARIO_PRESETS, configForPreset } from "./experiments/ScenarioPresets.js";
 import { Renderer } from "./rendering/Renderer.js";
 import { Simulation } from "./simulation/Simulation.js";
+import { DEFAULT_CONFIG } from "./simulation/SimulationConfig.js";
 
 const simulation = new Simulation();
+const APP_VERSION = "0.9.0";
 const renderer = new Renderer(document.querySelector("#world"));
 const playPause = document.querySelector("#play-pause");
 const buttonText = playPause.querySelector(".button-text");
@@ -10,6 +18,10 @@ let running = true;
 let speed = 1;
 let accumulator = 0;
 let previousTime = performance.now();
+let recorder;
+let eventLog;
+let replayController;
+let lastAnalysisSignature = "";
 
 const elements = {
   tick: document.querySelector("#tick"),
@@ -53,7 +65,33 @@ const elements = {
   averageDetour: document.querySelector("#average-detour"),
   completionTick: document.querySelector("#completion-tick"),
   time: document.querySelector("#sim-time"),
+  sampleInterval: document.querySelector("#sample-interval"),
+  sampleCount: document.querySelector("#sample-count"),
+  eventLog: document.querySelector("#event-log"),
+  replayTick: document.querySelector("#replay-tick"),
+  replayStatus: document.querySelector("#replay-status"),
+  preset: document.querySelector("#scenario-preset"),
 };
+
+const charts = [...document.querySelectorAll(".chart")].map((canvas) => (
+  new TimeSeriesRenderer(canvas, canvas.dataset.series)
+));
+
+function resetAnalytics() {
+  recorder = new MetricsRecorder({
+    sampleInterval: Number(elements.sampleInterval.value),
+    maxSamples: 10_000,
+  });
+  eventLog = new EventLog({ maxEvents: 5_000 });
+  recorder.record(simulation, { force: true });
+  replayController = new ReplayController(simulation, { onTick: observeTick });
+  lastAnalysisSignature = "";
+}
+
+function observeTick() {
+  recorder.record(simulation);
+  eventLog.capture(simulation.tickEvents);
+}
 
 function formatTime(milliseconds) {
   const tenths = Math.floor(milliseconds / 100) % 10;
@@ -116,6 +154,38 @@ function updateMetrics() {
   elements.time.textContent = formatTime(metrics.elapsedMs);
 }
 
+function describeEvent(event) {
+  const details = Object.entries(event)
+    .filter(([key]) => key !== "tick" && key !== "type")
+    .map(([key, value]) => `${key}=${typeof value === "number" ? Number(value.toFixed(2)) : value}`)
+    .join(" · ");
+  return `T=${event.tick}  ${event.type}${details ? `  ${details}` : ""}`;
+}
+
+function renderAnalytics() {
+  const samples = recorder.series.samples;
+  const lastEvent = eventLog.events.at(-1);
+  const signature = [
+    samples.length,
+    eventLog.events.length,
+    samples.at(-1)?.tick ?? 0,
+    lastEvent?.tick ?? 0,
+    lastEvent?.type ?? "",
+  ].join(":");
+  if (signature === lastAnalysisSignature) return;
+  lastAnalysisSignature = signature;
+  for (const chart of charts) chart.render(samples);
+  elements.sampleCount.textContent = `${samples.length} point${samples.length > 1 ? "s" : ""}`;
+  const recentEvents = eventLog.events.slice(-12).reverse();
+  elements.eventLog.replaceChildren(...(recentEvents.length > 0
+    ? recentEvents.map((event) => {
+      const item = document.createElement("li");
+      item.textContent = describeEvent(event);
+      return item;
+    })
+    : [Object.assign(document.createElement("li"), { textContent: "Aucun événement enregistré." })]));
+}
+
 function frame(now) {
   const frameDelta = Math.min(now - previousTime, 250);
   previousTime = now;
@@ -123,23 +193,30 @@ function frame(now) {
     accumulator += frameDelta * speed;
     while (accumulator >= simulation.config.tickDurationMs) {
       simulation.tick();
+      observeTick();
       accumulator -= simulation.config.tickDurationMs;
     }
   }
   renderer.render(simulation);
   updateMetrics();
+  renderAnalytics();
   requestAnimationFrame(frame);
 }
 
-playPause.addEventListener("click", () => {
-  running = !running;
+function setRunning(nextRunning) {
+  running = nextRunning;
   buttonText.textContent = running ? "Pause" : "Lecture";
   playPause.classList.toggle("paused", !running);
   playPause.setAttribute("aria-pressed", String(!running));
+}
+
+playPause.addEventListener("click", () => {
+  setRunning(!running);
 });
 
 document.querySelector("#reset").addEventListener("click", () => {
   simulation.reset();
+  resetAnalytics();
   accumulator = 0;
   updateMetrics();
 });
@@ -181,6 +258,7 @@ document.querySelector("#parameters-form").addEventListener("submit", (event) =>
     alarmInfluence: Number(document.querySelector("#param-alarm-influence").value),
     alarmEvaporationRate: Number(document.querySelector("#param-alarm-evaporation").value),
   });
+  resetAnalytics();
   accumulator = 0;
   updateMetrics();
 });
@@ -192,5 +270,136 @@ for (const button of speedButtons) {
   });
 }
 
+function applyConfigToForm(config) {
+  const values = {
+    "#param-ants": config.initialAnts,
+    "#param-evaporation": config.pheromoneEvaporationRate,
+    "#param-diffusion": config.pheromoneDiffusionRate,
+    "#param-food-deposit": config.foodDepositStrength,
+    "#param-home-deposit": config.homeDepositStrength,
+    "#param-influence": config.pheromoneInfluence,
+    "#param-exploration": config.explorationStrength,
+    "#param-energy-cost": config.energyConsumptionRate,
+    "#param-low-energy": config.lowEnergyThreshold,
+    "#param-food-energy": config.foodEnergyValue,
+    "#param-initial-stock": config.initialFoodStock,
+    "#param-laying-cooldown": config.queenLayingCooldownTicks,
+    "#param-reproduction-threshold": config.reproductionFoodThreshold,
+    "#param-max-brood": config.maxBrood,
+    "#param-egg-cost": config.eggFoodCost,
+    "#param-larva-food": config.larvaFoodPerTick,
+    "#param-food-regen": config.foodRegenerationRate,
+    "#param-season-duration": config.seasonDurationTicks,
+    "#param-environment-severity": config.environmentSeverity,
+    "#param-spawn-probability": config.foodSpawnProbability,
+    "#param-max-sources": config.maxActiveSources,
+    "#param-respawn-delay": config.foodRespawnDelayTicks,
+    "#param-alarm-influence": config.alarmInfluence,
+    "#param-alarm-evaporation": config.alarmEvaporationRate,
+  };
+  for (const [selector, value] of Object.entries(values)) {
+    document.querySelector(selector).value = value;
+  }
+  document.querySelector("#param-reproduction").checked = config.reproductionEnabled;
+  document.querySelector("#param-environment").checked = config.environmentEnabled;
+  document.querySelector("#param-alarm").checked = config.alarmPheromonesEnabled;
+}
+
+function loadConfiguration(config) {
+  const normalized = structuredClone({ ...DEFAULT_CONFIG, ...config });
+  if (!Number.isFinite(normalized.seed)
+    || normalized.width <= 0
+    || normalized.height <= 0
+    || !Array.isArray(normalized.foodSources)
+    || !Array.isArray(normalized.dangerZones)) {
+    throw new Error("Configuration Formica invalide");
+  }
+  simulation.reconfigure(normalized);
+  applyConfigToForm(normalized);
+  resetAnalytics();
+  accumulator = 0;
+  updateMetrics();
+}
+
+for (const preset of SCENARIO_PRESETS) {
+  const option = document.createElement("option");
+  option.value = preset.id;
+  option.textContent = preset.name;
+  option.title = preset.description;
+  elements.preset.append(option);
+}
+elements.preset.value = "balanced-alarm";
+
+document.querySelector("#apply-preset").addEventListener("click", () => {
+  loadConfiguration(configForPreset(elements.preset.value));
+});
+
+document.querySelector("#export-run-json").addEventListener("click", () => {
+  const payload = createRunExport({ simulation, recorder, eventLog, version: APP_VERSION });
+  downloadText(
+    `formica-run-seed-${simulation.config.seed}-tick-${simulation.tickCount}.json`,
+    JSON.stringify(payload, null, 2),
+    "application/json",
+  );
+});
+
+document.querySelector("#export-run-csv").addEventListener("click", () => {
+  downloadText(
+    `formica-series-seed-${simulation.config.seed}.csv`,
+    seriesToCsv(recorder.series.samples),
+    "text/csv;charset=utf-8",
+  );
+});
+
+document.querySelector("#export-config").addEventListener("click", () => {
+  downloadText(
+    `formica-config-seed-${simulation.config.seed}.json`,
+    JSON.stringify({
+      format: "formica-config",
+      version: APP_VERSION,
+      seed: simulation.config.seed,
+      config: simulation.config,
+    }, null, 2),
+    "application/json",
+  );
+});
+
+const configFile = document.querySelector("#config-file");
+document.querySelector("#import-config").addEventListener("click", () => configFile.click());
+configFile.addEventListener("change", async () => {
+  const [file] = configFile.files;
+  if (!file) return;
+  try {
+    const payload = JSON.parse(await file.text());
+    loadConfiguration(payload.config ?? payload);
+    if (Number.isFinite(payload.duration)) elements.replayTick.value = payload.duration;
+    elements.replayStatus.textContent = `Configuration ${file.name} chargée`;
+  } catch (error) {
+    elements.replayStatus.textContent = error.message;
+  } finally {
+    configFile.value = "";
+  }
+});
+
+elements.sampleInterval.addEventListener("change", () => resetAnalytics());
+
+document.querySelector("#replay-seek").addEventListener("click", async () => {
+  setRunning(false);
+  replayController.cancel();
+  resetAnalytics();
+  const controller = replayController;
+  const target = Number(elements.replayTick.value);
+  elements.replayStatus.textContent = "Recalcul…";
+  const completed = await controller.seek(target, {
+    onProgress(current, total) {
+      elements.replayStatus.textContent = total === 0 ? "Tick 0" : `${current} / ${total}`;
+    },
+  });
+  elements.replayStatus.textContent = completed ? `Replay au tick ${target}` : "Replay annulé";
+  updateMetrics();
+  renderAnalytics();
+});
+
+resetAnalytics();
 updateMetrics();
 requestAnimationFrame(frame);

@@ -136,6 +136,7 @@ export class Simulation {
     this.births = 0;
     this.nextAntId = this.config.initialAnts + 1;
     this.maxPopulation = this.config.initialAnts + 1;
+    this.tickEvents = [];
 
     for (let index = 0; index < this.config.initialAnts; index += 1) {
       const angle = this.random() * Math.PI * 2;
@@ -159,9 +160,17 @@ export class Simulation {
   }
 
   tick() {
+    this.tickEvents = [];
     const deltaSeconds = this.config.tickDurationMs / 1000;
     const consumedAtStart = this.colony.consumedFood;
+    const previousSeason = this.currentEnvironment.season;
     this.currentEnvironment = this.environment.getState(this.tickCount, this.config);
+    if (this.currentEnvironment.season !== previousSeason) {
+      this.emitEvent("SEASON_CHANGED", {
+        from: previousSeason,
+        to: this.currentEnvironment.season,
+      });
+    }
     if (this.config.environmentEnabled) {
       const foodUpdate = this.foodSpawn.update(
         this.foodSources,
@@ -171,6 +180,7 @@ export class Simulation {
       );
       this.regeneratedFood += foodUpdate.regenerated;
       this.expiredFood += foodUpdate.expiredFood;
+      for (const event of foodUpdate.events) this.emitEvent(event.type, event);
     } else {
       this.regeneratedFood += this.foodRegeneration.update(
         this.foodSources,
@@ -334,6 +344,7 @@ export class Simulation {
       } else {
         if (this.homeDetection.isInside(ant, this.colony.nest)) ant.distanceSinceNest = 0;
         if (this.config.pheromonesEnabled) this.depositTrail(ant);
+        const targetedSource = ant.target;
         if (this.foodCollection.collect(ant, this.config.foodPickupDistance)) {
           ant.returnStartedTick = this.tickCount;
           ant.returnDistance = 0;
@@ -345,16 +356,24 @@ export class Simulation {
             ) - this.colony.nest.radius,
           );
           this.totalPickups += 1;
+          if (targetedSource && !targetedSource.active) {
+            this.emitEvent("FOOD_SOURCE_DEPLETED", { sourceId: targetedSource.id });
+          }
           if (this.config.pheromonesEnabled) this.depositTrail(ant);
         }
       }
     }
+    const eggsBeforeUpdate = this.colony.queen.eggsLaid;
     const emergedWorkers = this.broodSystem.update(
       this.colony,
       this.config,
       this.currentEnvironment.broodDevelopmentMultiplier,
     );
+    if (this.colony.queen.eggsLaid > eggsBeforeUpdate) {
+      this.emitEvent("QUEEN_LAID_EGG", { queenId: this.colony.queen.id });
+    }
     for (let index = 0; index < emergedWorkers; index += 1) this.spawnWorker();
+    if (emergedWorkers > 0) this.emitEvent("WORKERS_EMERGED", { count: emergedWorkers });
     this.births += emergedWorkers;
     const currentPopulation = this.colony.ants.filter((ant) => ant.state !== AntState.DEAD).length
       + this.colony.brood.length + 1;
@@ -377,6 +396,7 @@ export class Simulation {
   handleDeath(ant, cause = "STARVATION") {
     if (cause === "ENVIRONMENT") {
       this.environmentalDeaths += 1;
+      this.emitEvent("ENVIRONMENTAL_DEATH", { antId: ant.id });
       if (this.config.pheromonesEnabled && this.config.alarmPheromonesEnabled) {
         this.alarmDeposit.depositDeath(
           ant.position,
@@ -387,6 +407,7 @@ export class Simulation {
       }
     } else {
       this.starvationDeaths += 1;
+      this.emitEvent("WORKER_DIED", { antId: ant.id, cause: "STARVATION" });
     }
     if (ant.carryingFood) {
       this.lostFood += ant.carryingFoodAmount;
@@ -396,6 +417,10 @@ export class Simulation {
     ant.returnStartedTick = null;
     ant.returnDistance = 0;
     ant.directReturnDistance = 0;
+  }
+
+  emitEvent(type, details = {}) {
+    this.tickEvents.push({ tick: this.tickCount, type, ...details });
   }
 
   spawnWorker() {

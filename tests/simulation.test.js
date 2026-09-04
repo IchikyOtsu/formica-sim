@@ -1,5 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { EventLog } from "../src/analytics/EventLog.js";
+import { MetricsRecorder } from "../src/analytics/MetricsRecorder.js";
+import { ReplayController } from "../src/analytics/ReplayController.js";
+import { createRunExport, seriesToCsv } from "../src/analytics/RunExporter.js";
+import { TimeSeries } from "../src/analytics/TimeSeries.js";
 import { SearchFoodBehavior } from "../src/behaviors/SearchFoodBehavior.js";
 import { ReturnHomeBehavior } from "../src/behaviors/ReturnHomeBehavior.js";
 import { Ant, AntState } from "../src/entities/Ant.js";
@@ -7,6 +12,8 @@ import { Brood, BroodStage } from "../src/entities/Brood.js";
 import { FoodSource, FoodSourceState } from "../src/entities/FoodSource.js";
 import { DangerZone } from "../src/environment/DangerZone.js";
 import { Season } from "../src/environment/Season.js";
+import { ExperimentRunner } from "../src/experiments/ExperimentRunner.js";
+import { SCENARIO_PRESETS, configForPreset } from "../src/experiments/ScenarioPresets.js";
 import { PheromoneField, PheromoneType } from "../src/simulation/PheromoneField.js";
 import { Renderer } from "../src/rendering/Renderer.js";
 import { Simulation } from "../src/simulation/Simulation.js";
@@ -1019,4 +1026,130 @@ test("ant behaviors receive signals but never danger-zone geometry", () => {
     simulation.dangerZones[0].position,
     simulation.dangerZones,
   ).exposed);
+});
+
+test("metrics recording samples at a fixed interval with bounded memory", () => {
+  const simulation = new Simulation(foragingConfig());
+  const recorder = new MetricsRecorder({ sampleInterval: 2, maxSamples: 3 });
+  recorder.record(simulation, { force: true });
+  for (let index = 0; index < 8; index += 1) {
+    simulation.tick();
+    recorder.record(simulation);
+  }
+  assert.deepEqual(recorder.series.samples.map((sample) => sample.tick), [4, 6, 8]);
+  assert.equal(recorder.series.samples[2].population, 1);
+  assert.ok(Object.isFrozen(recorder.series.samples[2]));
+});
+
+test("time series and event logs discard their oldest entries", () => {
+  const series = new TimeSeries({ maxSamples: 2 });
+  series.append({ tick: 1 });
+  series.append({ tick: 2 });
+  series.append({ tick: 3 });
+  assert.deepEqual(series.toJSON().map((sample) => sample.tick), [2, 3]);
+  const log = new EventLog({ maxEvents: 2 });
+  log.capture([{ tick: 1, type: "A" }, { tick: 2, type: "B" }, { tick: 3, type: "C" }]);
+  assert.deepEqual(log.toJSON().map((event) => event.type), ["B", "C"]);
+});
+
+test("structured simulation events explain seasons, laying, depletion, and deaths", () => {
+  const simulation = new Simulation({
+    ...foragingConfig(),
+    environmentEnabled: true,
+    seasonDurationTicks: 1,
+    foodSpawnProbability: 0,
+    initialFoodStock: 100,
+    reproductionFoodThreshold: 0,
+    queenLayingCooldownTicks: 100,
+    dangerZones: [],
+  });
+  simulation.colony.ants[0].position = { ...simulation.foodSources[0].position };
+  simulation.foodSources[0].quantity = 1;
+  simulation.tick();
+  assert.ok(simulation.tickEvents.some((event) => event.type === "FOOD_SOURCE_DEPLETED"));
+  assert.ok(simulation.tickEvents.some((event) => event.type === "QUEEN_LAID_EGG"));
+  simulation.tick();
+  assert.ok(simulation.tickEvents.some((event) => (
+    event.type === "SEASON_CHANGED" && event.from === Season.SPRING
+  )));
+});
+
+test("JSON and CSV exports contain reproducible configuration and sampled series", () => {
+  const simulation = new Simulation(foragingConfig());
+  const recorder = new MetricsRecorder({ sampleInterval: 1 });
+  const eventLog = new EventLog();
+  recorder.record(simulation, { force: true });
+  simulation.tick();
+  recorder.record(simulation);
+  eventLog.capture(simulation.tickEvents);
+  const exported = createRunExport({ simulation, recorder, eventLog, version: "0.9.0" });
+  assert.equal(exported.format, "formica-run");
+  assert.match(exported.runId, /^[0-9A-F]{8}$/);
+  assert.equal(exported.seed, simulation.config.seed);
+  assert.equal(exported.duration, 1);
+  assert.equal(exported.series.length, 2);
+  assert.deepEqual(exported.config, simulation.config);
+  const csv = seriesToCsv(exported.series);
+  assert.match(csv, /^tick,population,foodStock/);
+  assert.equal(csv.trim().split("\n").length, 3);
+});
+
+test("scenario presets produce independent complete configurations", () => {
+  assert.ok(SCENARIO_PRESETS.length >= 7);
+  const first = configForPreset("persistent-alarm");
+  const second = configForPreset("persistent-alarm");
+  assert.equal(first.alarmInfluence, 4);
+  assert.equal(first.width, DEFAULT_CONFIG.width);
+  first.dangerZones[0].radius = 1;
+  assert.notEqual(first.dangerZones[0].radius, second.dangerZones[0].radius);
+});
+
+test("the common experiment runner returns standard summaries, series, and events", () => {
+  const runner = new ExperimentRunner();
+  const result = runner.run({
+    config: { ...foragingConfig(), seasonDurationTicks: 2, environmentEnabled: true },
+    ticks: 5,
+    sampleInterval: 2,
+  });
+  assert.equal(result.metrics.tick, 5);
+  assert.equal(result.summary.duration, 5);
+  assert.deepEqual(result.series.map((sample) => sample.tick), [0, 2, 4]);
+  assert.ok(result.events.some((event) => event.type === "SEASON_CHANGED"));
+});
+
+test("analytics observation does not alter deterministic simulation results", () => {
+  const observed = new Simulation();
+  const control = new Simulation();
+  const recorder = new MetricsRecorder({ sampleInterval: 5 });
+  const log = new EventLog();
+  for (let index = 0; index < 500; index += 1) {
+    observed.tick();
+    recorder.record(observed);
+    log.capture(observed.tickEvents);
+    control.tick();
+  }
+  assert.equal(JSON.stringify(observed.colony), JSON.stringify(control.colony));
+  assert.deepEqual(
+    observed.pheromoneField.layer(PheromoneType.ALARM),
+    control.pheromoneField.layer(PheromoneType.ALARM),
+  );
+});
+
+test("replay reconstructs an exact tick from seed and configuration", async () => {
+  const reference = new Simulation(foragingConfig());
+  for (let index = 0; index < 25; index += 1) reference.tick();
+  const replayed = new Simulation(foragingConfig());
+  const previousAnimationFrame = globalThis.requestAnimationFrame;
+  globalThis.requestAnimationFrame = (callback) => setImmediate(callback);
+  try {
+    const replay = new ReplayController(replayed);
+    assert.equal(await replay.seek(25, { chunkSize: 7 }), true);
+  } finally {
+    globalThis.requestAnimationFrame = previousAnimationFrame;
+  }
+  assert.equal(JSON.stringify(replayed.colony), JSON.stringify(reference.colony));
+  assert.deepEqual(
+    replayed.pheromoneField.layer(PheromoneType.FOOD),
+    reference.pheromoneField.layer(PheromoneType.FOOD),
+  );
 });

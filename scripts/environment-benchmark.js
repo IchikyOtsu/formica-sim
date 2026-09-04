@@ -1,5 +1,5 @@
 import { AntState } from "../src/entities/Ant.js";
-import { Simulation } from "../src/simulation/Simulation.js";
+import { ExperimentRunner } from "../src/experiments/ExperimentRunner.js";
 import { DEFAULT_CONFIG } from "../src/simulation/SimulationConfig.js";
 
 const argument = (name, fallback) => {
@@ -10,6 +10,7 @@ const argument = (name, fallback) => {
 const seedCount = Math.max(1, argument("seeds", 1));
 const duration = Math.max(1, argument("ticks", 40_000));
 const seasonDurationTicks = Math.max(100, argument("season", 2_500));
+const runner = new ExperimentRunner();
 
 const experiments = [
   {
@@ -51,38 +52,32 @@ const experiments = [
 ];
 
 function run(experiment, seed) {
-  const simulation = new Simulation({
-    ...DEFAULT_CONFIG,
-    seasonDurationTicks,
-    alarmPheromonesEnabled: false,
-    ...experiment.config,
-    seed,
+  const result = runner.run({
+    config: {
+      ...DEFAULT_CONFIG,
+      seasonDurationTicks,
+      alarmPheromonesEnabled: false,
+      ...experiment.config,
+      seed,
+    },
+    ticks: duration,
+    sampleInterval: 100,
+    stopWhen(simulation) {
+      const hasWorkers = simulation.colony.ants.some((ant) => ant.state !== AntState.DEAD);
+      return !hasWorkers && simulation.colony.brood.length === 0;
+    },
   });
-  let populationTotal = 0;
-  let samples = 0;
-  let minimumPopulation = Infinity;
-  let minimumStock = Infinity;
-  let maximumStock = 0;
-  while (simulation.tickCount < duration) {
-    const hasWorkers = simulation.colony.ants.some((ant) => ant.state !== AntState.DEAD);
-    if (!hasWorkers && simulation.colony.brood.length === 0) break;
-    simulation.tick();
-    if (simulation.tickCount % 100 !== 0) continue;
-    const metrics = simulation.getMetrics();
-    populationTotal += metrics.livingAnts;
-    samples += 1;
-    minimumPopulation = Math.min(minimumPopulation, metrics.livingAnts);
-    minimumStock = Math.min(minimumStock, metrics.foodStock);
-    maximumStock = Math.max(maximumStock, metrics.foodStock);
-  }
-  const metrics = simulation.getMetrics();
+  const { metrics, series } = result;
+  const sampledPopulation = series.map((sample) => sample.population);
+  const sampledStock = series.map((sample) => sample.foodStock);
   return {
     outcome: metrics.livingAnts === 0 && metrics.broodSize === 0 ? "EXTINCTION" : "SURVIE",
-    averagePopulation: samples === 0 ? metrics.livingAnts : populationTotal / samples,
-    minimumPopulation: minimumPopulation === Infinity ? metrics.livingAnts : minimumPopulation,
+    averagePopulation: sampledPopulation.reduce((total, value) => total + value, 0)
+      / sampledPopulation.length,
+    minimumPopulation: Math.min(...sampledPopulation),
     finalPopulation: metrics.livingAnts,
-    minimumStock: minimumStock === Infinity ? metrics.foodStock : minimumStock,
-    maximumStock,
+    minimumStock: Math.min(...sampledStock),
+    maximumStock: Math.max(...sampledStock),
     finalStock: metrics.foodStock,
     births: metrics.births,
     deaths: metrics.deaths,

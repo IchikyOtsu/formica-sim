@@ -1,4 +1,5 @@
-import { Simulation } from "../src/simulation/Simulation.js";
+import { summarize } from "../src/experiments/AggregateStatistics.js";
+import { ExperimentRunner } from "../src/experiments/ExperimentRunner.js";
 import { DEFAULT_CONFIG } from "../src/simulation/SimulationConfig.js";
 import { AntState } from "../src/entities/Ant.js";
 
@@ -8,6 +9,7 @@ const argument = (name, fallback) => {
 };
 const seedCount = Math.max(1, argument("seeds", 1));
 const duration = Math.max(1, argument("ticks", 50_000));
+const runner = new ExperimentRunner();
 
 const experiments = [
   { name: "A — coût nul", energyConsumptionRate: 0, basalEnergyConsumptionRate: 0 },
@@ -17,19 +19,21 @@ const experiments = [
 ];
 
 function run(experiment, seed) {
-  const simulation = new Simulation({
-    ...DEFAULT_CONFIG,
-    environmentEnabled: false,
-    reproductionEnabled: false,
-    foodRegenerationRate: 0,
-    ...experiment,
-    seed,
+  const result = runner.run({
+    config: {
+      ...DEFAULT_CONFIG,
+      environmentEnabled: false,
+      reproductionEnabled: false,
+      foodRegenerationRate: 0,
+      ...experiment,
+      seed,
+    },
+    ticks: duration,
+    stopWhen: (simulation) => !simulation.colony.ants.some(
+      (ant) => ant.state !== AntState.DEAD,
+    ),
   });
-  while (simulation.tickCount < duration
-    && simulation.colony.ants.some((ant) => ant.state !== AntState.DEAD)) {
-    simulation.tick();
-  }
-  const metrics = simulation.getMetrics();
+  const { metrics } = result;
   return {
     outcome: metrics.livingAnts === 0
       ? "EXTINCTION"
@@ -43,22 +47,7 @@ function run(experiment, seed) {
     mortality: metrics.deadAnts,
     averageEnergy: metrics.averageEnergy,
     averageDistance: metrics.totalDistance / metrics.totalAnts,
-    finalTick: simulation.tickCount,
-  };
-}
-
-function summarize(values) {
-  const sorted = [...values].sort((a, b) => a - b);
-  const mean = values.reduce((total, value) => total + value, 0) / values.length;
-  const middle = Math.floor(sorted.length / 2);
-  const median = sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
-  const variance = values.reduce((total, value) => total + (value - mean) ** 2, 0) / values.length;
-  return {
-    mean,
-    median,
-    min: sorted[0],
-    max: sorted.at(-1),
-    standardDeviation: Math.sqrt(variance),
+    finalTick: metrics.tick,
   };
 }
 

@@ -1,4 +1,5 @@
-import { Simulation } from "../src/simulation/Simulation.js";
+import { summarize } from "../src/experiments/AggregateStatistics.js";
+import { ExperimentRunner } from "../src/experiments/ExperimentRunner.js";
 import { DEFAULT_CONFIG } from "../src/simulation/SimulationConfig.js";
 
 const argument = (name, fallback) => {
@@ -7,6 +8,7 @@ const argument = (name, fallback) => {
 };
 const seedCount = Math.max(1, argument("seeds", 5));
 const tickLimit = Math.max(1, argument("limit", 100_000));
+const runner = new ExperimentRunner();
 
 const experiments = [
   {
@@ -28,16 +30,19 @@ const experiments = [
 ];
 
 function run(config, seed) {
-  const simulation = new Simulation({
-    ...DEFAULT_CONFIG,
-    environmentEnabled: false,
-    reproductionEnabled: false,
-    foodRegenerationRate: 0,
-    ...config,
-    seed,
+  const result = runner.run({
+    config: {
+      ...DEFAULT_CONFIG,
+      environmentEnabled: false,
+      reproductionEnabled: false,
+      foodRegenerationRate: 0,
+      ...config,
+      seed,
+    },
+    ticks: tickLimit,
+    stopWhen: (simulation) => simulation.completionTick !== null,
   });
-  while (simulation.completionTick === null && simulation.tickCount < tickLimit) simulation.tick();
-  const metrics = simulation.getMetrics();
+  const { metrics, simulation } = result;
   return {
     completed: simulation.completionTick !== null,
     ticks: simulation.completionTick ?? tickLimit,
@@ -46,15 +51,6 @@ function run(config, seed) {
     returnTicks: metrics.averageReturnTicks,
     exploredCells: metrics.exploredCells,
   };
-}
-
-function summarize(values) {
-  const sorted = [...values].sort((a, b) => a - b);
-  const mean = values.reduce((total, value) => total + value, 0) / values.length;
-  const middle = Math.floor(sorted.length / 2);
-  const median = sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
-  const variance = values.reduce((total, value) => total + (value - mean) ** 2, 0) / values.length;
-  return { mean, median, min: sorted[0], max: sorted.at(-1), standardDeviation: Math.sqrt(variance) };
 }
 
 function rounded(value) {

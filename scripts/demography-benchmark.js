@@ -1,5 +1,6 @@
 import { AntState } from "../src/entities/Ant.js";
-import { Simulation } from "../src/simulation/Simulation.js";
+import { summarize } from "../src/experiments/AggregateStatistics.js";
+import { ExperimentRunner } from "../src/experiments/ExperimentRunner.js";
 import { DEFAULT_CONFIG } from "../src/simulation/SimulationConfig.js";
 
 const argument = (name, fallback) => {
@@ -8,6 +9,7 @@ const argument = (name, fallback) => {
 };
 const seedCount = Math.max(1, argument("seeds", 1));
 const duration = Math.max(1, argument("ticks", 50_000));
+const runner = new ExperimentRunner();
 const scaledFood = (quantities) => DEFAULT_CONFIG.foodSources.map((source, index) => ({
   ...source,
   quantity: quantities[index],
@@ -37,18 +39,20 @@ const experiments = [
 ];
 
 function run(experiment, seed) {
-  const simulation = new Simulation({
-    ...DEFAULT_CONFIG,
-    environmentEnabled: false,
-    ...experiment.config,
-    seed,
+  const result = runner.run({
+    config: {
+      ...DEFAULT_CONFIG,
+      environmentEnabled: false,
+      ...experiment.config,
+      seed,
+    },
+    ticks: duration,
+    stopWhen(simulation) {
+      const hasWorkers = simulation.colony.ants.some((ant) => ant.state !== AntState.DEAD);
+      return !hasWorkers && simulation.colony.brood.length === 0;
+    },
   });
-  while (simulation.tickCount < duration) {
-    const hasWorkers = simulation.colony.ants.some((ant) => ant.state !== AntState.DEAD);
-    if (!hasWorkers && simulation.colony.brood.length === 0) break;
-    simulation.tick();
-  }
-  const metrics = simulation.getMetrics();
+  const { metrics } = result;
   return {
     outcome: metrics.livingAnts === 0 && metrics.broodSize === 0
       ? "EXTINCTION"
@@ -62,17 +66,8 @@ function run(experiment, seed) {
     deaths: metrics.deaths,
     netGrowth: metrics.netGrowth,
     broodFoodCost: metrics.broodFoodCost + metrics.reproductionFoodCost,
-    finalTick: simulation.tickCount,
+    finalTick: metrics.tick,
   };
-}
-
-function summarize(values) {
-  const sorted = [...values].sort((a, b) => a - b);
-  const mean = values.reduce((total, value) => total + value, 0) / values.length;
-  const middle = Math.floor(sorted.length / 2);
-  const median = sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
-  const variance = values.reduce((total, value) => total + (value - mean) ** 2, 0) / values.length;
-  return { mean, median, min: sorted[0], max: sorted.at(-1), sd: Math.sqrt(variance) };
 }
 
 const rounded = (value) => Number(value.toFixed(2));
@@ -106,7 +101,7 @@ for (const experiment of experiments) {
       médiane: rounded(stats.median),
       min: rounded(stats.min),
       max: rounded(stats.max),
-      "écart-type": rounded(stats.sd),
+      "écart-type": rounded(stats.standardDeviation),
     };
   }));
 }

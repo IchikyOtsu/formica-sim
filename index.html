@@ -19,7 +19,7 @@
           </span>
           <div>
             <p class="eyebrow">Laboratoire de terrain</p>
-            <h1>FORMICA <span>/ SIM V0.8</span></h1>
+            <h1>FORMICA <span>/ SIM V0.9</span></h1>
           </div>
         </div>
         <div class="status-pill"><span></span> Système opérationnel</div>
@@ -208,6 +208,44 @@
               <button type="submit">Appliquer + Reset</button>
             </form>
           </details>
+          <section class="analysis-panel" aria-labelledby="analysis-title">
+            <div class="analysis-heading">
+              <div>
+                <p class="eyebrow">Observabilité</p>
+                <h2 id="analysis-title">ANALYSE TEMPORELLE</h2>
+              </div>
+              <div class="analysis-actions">
+                <label>Scénario<select id="scenario-preset"></select></label>
+                <button id="apply-preset" type="button">Charger</button>
+                <button id="export-run-json" type="button">Run JSON</button>
+                <button id="export-run-csv" type="button">Séries CSV</button>
+                <button id="export-config" type="button">Config</button>
+                <button id="import-config" type="button">Importer</button>
+                <input id="config-file" type="file" accept="application/json,.json" hidden />
+              </div>
+            </div>
+            <div class="chart-grid">
+              <article><h3>Population</h3><canvas class="chart" data-series="population"></canvas></article>
+              <article><h3>Stock alimentaire</h3><canvas class="chart" data-series="foodStock"></canvas></article>
+              <article><h3>Énergie moyenne</h3><canvas class="chart" data-series="averageEnergy"></canvas></article>
+              <article><h3>Mortalité cumulée</h3><canvas class="chart" data-series="deaths"></canvas></article>
+            </div>
+            <div class="analysis-footer">
+              <div class="replay-control">
+                <label>Tick du replay<input id="replay-tick" type="number" min="0" step="100" value="10000" /></label>
+                <button id="replay-seek" type="button">Rejouer jusqu’au tick</button>
+                <span id="replay-status">Prêt</span>
+              </div>
+              <div class="sampling-control">
+                <label>Échantillonnage<input id="sample-interval" type="number" min="1" max="10000" step="10" value="50" /></label>
+                <span id="sample-count">1 point</span>
+              </div>
+            </div>
+            <div class="event-panel">
+              <p class="section-label">Événements structurants récents</p>
+              <ol id="event-log"><li>Aucun événement enregistré.</li></ol>
+            </div>
+          </section>
         </section>
       </section>
     </main>

@@ -1,9 +1,9 @@
 # Formica Sim
 
 Un petit laboratoire visuel pour observer une colonie de fourmis dans un monde
-2D. La V0.8 ajoute une adaptation collective au danger : l'expérience locale
-produit une phéromone `ALARM`, puis les autres fourmis apprennent indirectement
-à éviter les passages risqués sans connaître leur géométrie.
+2D. La V0.9 transforme le simulateur en outil expérimental : historique borné,
+graphiques, événements structurants, exports JSON/CSV, presets reproductibles,
+replay déterministe et infrastructure commune pour les benchmarks.
 
 ## Lancer le projet
 
@@ -51,13 +51,23 @@ Le benchmark V0.5 de survie est également conservé :
 npm run benchmark:survival
 ```
 
+Toutes les familles utilisent désormais le même point d'entrée :
+
+```bash
+npm run experiment -- alarm --seeds=100 --ticks=30000
+npm run experiment -- environment --seeds=20 --ticks=40000
+```
+
 ## Architecture
 
 ```text
 src/
+├── analytics/{TimeSeries,MetricsRecorder,EventLog,RunSummary}.js
+├── analytics/{RunExporter,ReplayController,TimeSeriesRenderer}.js
 ├── behaviors/{RandomWalk,SearchFoodBehavior,ReturnHomeBehavior}.js
 ├── entities/{Ant,Colony,FoodSource,Nest,Queen,Brood}.js
 ├── environment/{Season,EnvironmentConfig,DangerZone}.js
+├── experiments/{ScenarioPresets,ExperimentRunner,AggregateStatistics}.js
 ├── rendering/Renderer.js
 ├── simulation/{Simulation,SimulationConfig,World,PheromoneField}.js
 ├── systems/{MovementSystem,FoodDetectionSystem,FoodCollectionSystem}.js
@@ -289,3 +299,36 @@ environnementale passe de 4 à 3 ouvrières.
 Le profil fort et persistant descend à 2 morts, mais sa collecte chute à 380 et
 son détour moyen remonte à 364 unités : la barrière informationnelle devient
 plus coûteuse que le risque qu'elle évite.
+
+## Observabilité, expérimentation et replay V0.9
+
+`MetricsRecorder` échantillonne par défaut tous les 50 ticks : population,
+stock, collecte, consommation, couvain, naissances, mortalité, énergie, trois
+phéromones et expositions. `TimeSeries` et `EventLog` éliminent automatiquement
+leurs entrées les plus anciennes au-delà de leurs limites respectives ; la
+mémoire ne dépend donc pas linéairement de la durée d'un très long run.
+
+Le panneau **Analyse temporelle** rend quatre séries sans jamais intervenir dans
+le moteur : population, stock, énergie moyenne et mortalité cumulée. La fréquence
+d'échantillonnage est modifiable. Le journal conserve les changements de saison,
+apparitions, épuisements et réapparitions de sources, pontes, émergences et morts.
+
+Les boutons d'export produisent :
+
+- un run JSON identifié, avec version, seed, configuration, durée, résumé, séries et événements ;
+- un CSV à colonnes stables pour Python, R ou un tableur ;
+- une configuration JSON importable dans l'interface.
+
+Sept presets couvrent stabilité, saisons modérées, hiver hostile, alarmes
+équilibrée ou persistante, rareté et boom démographique. Chaque application de
+preset repart de `DEFAULT_CONFIG`, ce qui empêche un paramètre du scénario
+précédent de fuir dans le suivant.
+
+Le replay stocke seulement version, seed, configuration et tick cible. Il
+recalcule la simulation par blocs non bloquants depuis l'état initial, puis
+reconstruit simultanément séries et événements. Les tests vérifient qu'un replay
+retrouve exactement la colonie et les champs de phéromones de référence.
+
+Enfin, `ExperimentRunner` fournit à chaque benchmark la même boucle multi-ticks,
+le même échantillonnage, un `RunSummary` et un journal. `AggregateStatistics`
+centralise moyenne, médiane, extrema et écart-type pour les comparaisons de seeds.
