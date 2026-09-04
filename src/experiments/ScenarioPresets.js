@@ -234,11 +234,11 @@ export const SCENARIO_PRESETS = Object.freeze([
   },
   {
     id: "castes-v1.3",
-    name: "Castes adaptatives V1.3",
-    description: "Ambre (défensive, castes adaptatives) contre Azur (agressive figée) : les soldats apparaissent avec un délai après la montée de la menace, sans réglage manuel.",
+    name: "Confrontation complète V1.3",
+    description: "Ambre (posture défensive) contre Azur (posture agressive), calibrage figé V1.2, chacune avec la même règle adaptative de production de soldats : deux stratégies différentes, mêmes possibilités, territoire et ALARM actifs. Résume tous les ajouts depuis le début.",
     category: "castes",
     seed: 1847,
-    duration: 15_000,
+    duration: 20_000,
     config: {
       queenLayingCooldownTicks: 300,
       maxBrood: 20,
@@ -251,7 +251,14 @@ export const SCENARIO_PRESETS = Object.freeze([
           threatPressureRatioScale: 150,
           casteStockThreshold: 30,
         },
-        { ...colonies()[1], ...combatProfileOverrides("aggressive") },
+        {
+          ...colonies()[1],
+          ...combatProfileOverrides("aggressive"),
+          castesEnabled: true,
+          casteSoldierRatioCap: 0.35,
+          threatPressureRatioScale: 150,
+          casteStockThreshold: 30,
+        },
       ],
       foodSources: [
         { id: "CENTER", x: 400, y: 260, quantity: 140, radius: 22 },
