@@ -69,6 +69,13 @@ function scenarioConfig(profileId, seed) {
   return {
     ...DEFAULT_CONFIG,
     seed,
+    // Le rythme de ponte par défaut (1 œuf / 1500 ticks) laisse trop peu de
+    // naissances sur la fenêtre du benchmark pour que la politique de caste
+    // ait un vrai budget à répartir. Accéléré pour que les 4 profils divergent
+    // réellement — sans quoi la reine ne pond qu'une poignée d'œufs au total,
+    // quelle que soit la stratégie.
+    queenLayingCooldownTicks: 300,
+    maxBrood: 20,
     colonies: [
       { ...colonyA, ...combatProfileOverrides("defensive"), ...CASTE_PROFILES[profileId].overrides },
       { ...colonyB, ...combatProfileOverrides("aggressive"), castesEnabled: false },
