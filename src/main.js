@@ -18,6 +18,10 @@ const elements = {
   foodRemaining: document.querySelector("#food-remaining"),
   resources: document.querySelector("#resources"),
   carryingAnts: document.querySelector("#carrying-ants"),
+  pheromoneTotal: document.querySelector("#pheromone-total"),
+  pheromoneCells: document.querySelector("#pheromone-cells"),
+  pheromoneMaximum: document.querySelector("#pheromone-max"),
+  completionTick: document.querySelector("#completion-tick"),
   time: document.querySelector("#sim-time"),
 };
 
@@ -37,6 +41,12 @@ function updateMetrics() {
   elements.foodRemaining.textContent = metrics.foodRemaining;
   elements.resources.textContent = metrics.resources;
   elements.carryingAnts.textContent = metrics.carryingAnts;
+  elements.pheromoneTotal.textContent = metrics.pheromoneTotal.toFixed(0);
+  elements.pheromoneCells.textContent = metrics.pheromoneCells;
+  elements.pheromoneMaximum.textContent = metrics.pheromoneMaximum.toFixed(1);
+  elements.completionTick.textContent = metrics.completionTick === null
+    ? "—"
+    : `${metrics.completionTick} ticks`;
   elements.time.textContent = formatTime(metrics.elapsedMs);
 }
 
@@ -66,6 +76,14 @@ document.querySelector("#reset").addEventListener("click", () => {
   simulation.reset();
   accumulator = 0;
   updateMetrics();
+});
+
+const pheromoneToggle = document.querySelector("#toggle-pheromones");
+pheromoneToggle.addEventListener("click", () => {
+  const visible = pheromoneToggle.getAttribute("aria-pressed") !== "true";
+  pheromoneToggle.setAttribute("aria-pressed", String(visible));
+  pheromoneToggle.classList.toggle("active", visible);
+  renderer.setPheromonesVisible(visible);
 });
 
 for (const button of speedButtons) {

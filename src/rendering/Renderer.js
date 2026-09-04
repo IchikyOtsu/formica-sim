@@ -2,6 +2,11 @@ export class Renderer {
   constructor(canvas) {
     this.canvas = canvas;
     this.context = canvas.getContext("2d");
+    this.showPheromones = true;
+  }
+
+  setPheromonesVisible(visible) {
+    this.showPheromones = visible;
   }
 
   resize() {
@@ -25,6 +30,7 @@ export class Renderer {
     ctx.setTransform(scaleX, 0, 0, scaleY, 0, 0);
     ctx.clearRect(0, 0, world.width, world.height);
     this.drawGrid(ctx, world);
+    if (this.showPheromones) this.drawPheromones(ctx, simulation.pheromoneField);
 
     for (const source of foodSources) {
       if (source.active) this.drawFood(ctx, source);
@@ -46,6 +52,26 @@ export class Renderer {
     }
     ctx.strokeStyle = "rgba(219, 231, 192, 0.2)";
     ctx.strokeRect(0.5, 0.5, world.width - 1, world.height - 1);
+  }
+
+  drawPheromones(ctx, field) {
+    ctx.save();
+    ctx.globalCompositeOperation = "screen";
+    for (let row = 0; row < field.rows; row += 1) {
+      for (let column = 0; column < field.columns; column += 1) {
+        const intensity = field.values[row * field.columns + column];
+        if (intensity <= 0) continue;
+        const alpha = Math.min(0.46, Math.sqrt(intensity / field.maxIntensity) * 0.48);
+        ctx.fillStyle = `rgba(114, 193, 112, ${alpha})`;
+        ctx.fillRect(
+          column * field.cellSize,
+          row * field.cellSize,
+          field.cellSize,
+          field.cellSize,
+        );
+      }
+    }
+    ctx.restore();
   }
 
   drawNest(ctx, nest) {

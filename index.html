@@ -19,7 +19,7 @@
           </span>
           <div>
             <p class="eyebrow">Laboratoire de terrain</p>
-            <h1>FORMICA <span>/ SIM V0.2</span></h1>
+            <h1>FORMICA <span>/ SIM V0.3</span></h1>
           </div>
         </div>
         <div class="status-pill"><span></span> Système opérationnel</div>
@@ -56,17 +56,28 @@
             </article>
           </div>
 
+          <div class="signal-panel">
+            <p class="section-label">Champ de phéromones</p>
+            <div class="signal-stats">
+              <p><strong id="pheromone-total">0</strong><span>Intensité</span></p>
+              <p><strong id="pheromone-cells">0</strong><span>Cellules</span></p>
+              <p><strong id="pheromone-max">0</strong><span>Maximum</span></p>
+            </div>
+            <p class="completion"><span>Collecte complète</span><strong id="completion-tick">—</strong></p>
+          </div>
+
           <div class="legend">
             <p class="section-label">Légende</p>
             <div><span class="legend-dot ant-dot"></span> Fourmi <em>Recherche</em></div>
             <div><span class="legend-dot return-dot"></span> Fourmi <em>Retour au nid</em></div>
             <div><span class="legend-dot nest-dot"></span> Nid <em>Point d'origine</em></div>
             <div><span class="legend-dot food-dot"></span> Nourriture <em>Ressource</em></div>
+            <div><span class="legend-dot pheromone-dot"></span> Phéromone <em>Piste collective</em></div>
           </div>
 
           <div class="observation">
             <p class="section-label">Observation</p>
-            <p>Les individus détectent localement la nourriture, en prélèvent une unité puis reviennent directement la déposer au nid.</p>
+            <p>Les retours chargés déposent une piste volatile. Les chercheuses la suivent avec un biais, sans perdre leur mouvement exploratoire.</p>
           </div>
         </aside>
 
@@ -85,6 +96,7 @@
           <div class="controls" role="group" aria-label="Contrôles de simulation">
             <button id="play-pause" class="primary" type="button"><span class="pause-icon" aria-hidden="true"></span><span class="button-text">Pause</span></button>
             <button id="reset" type="button"><span class="reset-icon" aria-hidden="true">↻</span> Reset</button>
+            <button id="toggle-pheromones" class="toggle active" type="button" aria-pressed="true"><span aria-hidden="true">◉</span> Pistes</button>
             <div class="speed-control">
               <span>Vitesse</span>
               <button class="speed active" data-speed="1" type="button">×1</button>
