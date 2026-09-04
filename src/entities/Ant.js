@@ -3,10 +3,27 @@ export const AntState = Object.freeze({
   EXPLORING: "EXPLORING",
   SEARCHING_FOOD: "SEARCHING_FOOD",
   RETURNING_HOME: "RETURNING_HOME",
+  RESTING: "RESTING",
+  DEAD: "DEAD",
+});
+
+export const ReturnReason = Object.freeze({
+  FOOD: "FOOD",
+  ENERGY: "ENERGY",
 });
 
 export class Ant {
-  constructor({ id, position, direction, speed, colonyId, energy = 100 }) {
+  constructor({
+    id,
+    position,
+    direction,
+    speed,
+    colonyId,
+    energy = 100,
+    maxEnergy = 100,
+    energyConsumptionRate = 0,
+    lowEnergyThreshold = 0.4,
+  }) {
     this.id = id;
     this.position = { ...position };
     this.direction = direction;
@@ -14,11 +31,15 @@ export class Ant {
     this.state = AntState.SEARCHING_FOOD;
     this.colonyId = colonyId;
     this.energy = energy;
+    this.maxEnergy = maxEnergy;
+    this.energyConsumptionRate = energyConsumptionRate;
+    this.lowEnergyThreshold = lowEnergyThreshold;
     this.carryingFood = false;
     this.age = 0;
     this.target = null;
     this.distanceSinceNest = 0;
     this.recentCells = [];
     this.returnStartedTick = null;
+    this.returnReason = null;
   }
 }

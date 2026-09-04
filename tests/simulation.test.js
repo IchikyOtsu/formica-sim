@@ -13,6 +13,7 @@ import { FoodDetectionSystem } from "../src/systems/FoodDetectionSystem.js";
 import { HomeDetectionSystem } from "../src/systems/HomeDetectionSystem.js";
 import { PheromoneDepositSystem } from "../src/systems/PheromoneDepositSystem.js";
 import { PheromoneSensingSystem } from "../src/systems/PheromoneSensingSystem.js";
+import { MetabolismSystem } from "../src/systems/MetabolismSystem.js";
 
 function foragingConfig(overrides = {}) {
   return {
@@ -373,4 +374,165 @@ test("all four benchmark modes complete and V0.4 returns without GPS", () => {
   assert.ok(modes[1].completionTick < modes[0].completionTick);
   assert.equal(modes[3].config.directHomeNavigation, false);
   assert.equal(modes[3].colony.ants.some((ant) => ant.target === modes[3].colony.nest), false);
+});
+
+test("energy consumption depends on actual distance and carrying cost", () => {
+  const metabolism = new MetabolismSystem();
+  const createAnt = () => new Ant({
+    id: "ENERGY",
+    position: { x: 0, y: 0 },
+    direction: 0,
+    speed: 1,
+    colonyId: "C-01",
+    energy: 100,
+    maxEnergy: 100,
+    energyConsumptionRate: 0.1,
+  });
+  const oneMove = createAnt();
+  metabolism.consumeEnergy(oneMove, 10, 0, 1.5, 0);
+  const twoMoves = createAnt();
+  metabolism.consumeEnergy(twoMoves, 5, 0, 1.5, 0);
+  metabolism.consumeEnergy(twoMoves, 5, 0, 1.5, 0);
+  assert.equal(oneMove.energy, twoMoves.energy);
+  assert.equal(oneMove.energy, 99);
+
+  const carrier = createAnt();
+  carrier.carryingFood = true;
+  metabolism.consumeEnergy(carrier, 10, 0, 1.5, 0);
+  assert.equal(carrier.energy, 98.5);
+});
+
+test("colony stock conserves fractional deposits and consumption", () => {
+  const simulation = new Simulation(foragingConfig({ initialFoodStock: 2 }));
+  simulation.colony.depositFood(1);
+  assert.equal(simulation.colony.resources, 1);
+  assert.equal(simulation.colony.foodStock, 3);
+  assert.equal(simulation.colony.consumeFood(0.2), 0.2);
+  assert.equal(simulation.colony.foodStock, 2.8);
+  assert.equal(simulation.colony.consumedFood, 0.2);
+});
+
+test("low energy starts a HOME-guided return without carrying food", () => {
+  const simulation = new Simulation(foragingConfig({
+    energyConsumptionRate: 0,
+    basalEnergyConsumptionRate: 0,
+  }));
+  const ant = simulation.colony.ants[0];
+  ant.position = { x: 80, y: 70 };
+  ant.energy = ant.maxEnergy * ant.lowEnergyThreshold;
+  simulation.tick();
+  assert.equal(ant.state, AntState.RETURNING_HOME);
+  assert.equal(ant.returnReason, "ENERGY");
+  assert.equal(ant.carryingFood, false);
+  assert.equal(ant.target, null);
+});
+
+test("feeding consumes fractional stock and rests an underfed ant", () => {
+  const simulation = new Simulation(foragingConfig({ initialFoodStock: 0.2 }));
+  const ant = simulation.colony.ants[0];
+  ant.energy = 50;
+  const consumed = simulation.metabolism.feedAtNest(ant, simulation.colony, 100, 0.8);
+  assert.equal(consumed, 0.2);
+  assert.equal(ant.energy, 70);
+  assert.equal(ant.state, AntState.RESTING);
+  assert.equal(simulation.colony.foodStock, 0);
+});
+
+test("a resting ant resumes work when food becomes available", () => {
+  const simulation = new Simulation(foragingConfig({ initialFoodStock: 0 }));
+  const ant = simulation.colony.ants[0];
+  ant.energy = 50;
+  simulation.metabolism.feedAtNest(ant, simulation.colony, 30, 0.75);
+  assert.equal(ant.state, AntState.RESTING);
+  simulation.colony.depositFood(1);
+  simulation.metabolism.feedAtNest(ant, simulation.colony, 30, 0.75);
+  assert.equal(ant.state, AntState.SEARCHING_FOOD);
+  assert.equal(ant.energy, 80);
+});
+
+test("a dead ant stops moving and depositing pheromones", () => {
+  const simulation = new Simulation(foragingConfig({
+    antEnergy: 0.1,
+    antMaxEnergy: 1,
+    energyConsumptionRate: 1,
+    basalEnergyConsumptionRate: 0,
+    lowEnergyThreshold: 0,
+  }));
+  const ant = simulation.colony.ants[0];
+  simulation.tick();
+  assert.equal(ant.state, AntState.DEAD);
+  const position = { ...ant.position };
+  const pheromones = simulation.pheromoneField.getStats().total;
+  simulation.tick();
+  assert.deepEqual(ant.position, position);
+  assert.ok(simulation.pheromoneField.getStats().total <= pheromones);
+  assert.equal(simulation.getMetrics().livingAnts, 0);
+  assert.equal(simulation.getMetrics().deadAnts, 1);
+});
+
+test("food carried by a dead ant is tracked rather than duplicated", () => {
+  const simulation = new Simulation(foragingConfig({
+    foodSources: [{ x: 70, y: 40, quantity: 1, radius: 5 }],
+    energyConsumptionRate: 0,
+    basalEnergyConsumptionRate: 0,
+    initialFoodStock: 0,
+  }));
+  const ant = simulation.colony.ants[0];
+  ant.position = { ...simulation.foodSources[0].position };
+  simulation.tick();
+  assert.equal(ant.carryingFood, true);
+  ant.energyConsumptionRate = 100;
+  simulation.tick();
+  const metrics = simulation.getMetrics();
+  assert.equal(ant.state, AntState.DEAD);
+  assert.equal(metrics.lostFood, 1);
+  assert.equal(
+    metrics.foodRemaining + metrics.foodStock + metrics.consumedFood
+      + metrics.carryingAnts + metrics.lostFood,
+    1,
+  );
+});
+
+test("metabolic parameters produce durable and extinct colonies", () => {
+  const durable = new Simulation(foragingConfig({
+    initialAnts: 5,
+    antEnergy: 10,
+    antMaxEnergy: 10,
+    initialFoodStock: 10,
+    energyConsumptionRate: 0.001,
+    basalEnergyConsumptionRate: 0,
+  }));
+  const extinct = new Simulation(foragingConfig({
+    initialAnts: 5,
+    antEnergy: 0.1,
+    antMaxEnergy: 1,
+    initialFoodStock: 0,
+    foodSources: [],
+    energyConsumptionRate: 1,
+    basalEnergyConsumptionRate: 0.1,
+    lowEnergyThreshold: 0,
+  }));
+  for (let index = 0; index < 500; index += 1) {
+    durable.tick();
+    extinct.tick();
+  }
+  assert.equal(durable.getMetrics().livingAnts, 5);
+  assert.equal(extinct.getMetrics().livingAnts, 0);
+});
+
+test("reset restores energy, mortality, stock, and consumption", () => {
+  const simulation = new Simulation(foragingConfig({ initialFoodStock: 4 }));
+  const ant = simulation.colony.ants[0];
+  ant.energy = 0;
+  ant.state = AntState.DEAD;
+  simulation.colony.consumeFood(1.25);
+  simulation.lostFood = 1;
+  simulation.reset();
+  const metrics = simulation.getMetrics();
+  assert.equal(metrics.livingAnts, 1);
+  assert.equal(metrics.deadAnts, 0);
+  assert.equal(simulation.colony.ants[0].energy, simulation.config.antEnergy);
+  assert.equal(metrics.foodStock, 4);
+  assert.equal(metrics.consumedFood, 0);
+  assert.equal(metrics.lostFood, 0);
 });

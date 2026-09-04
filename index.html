@@ -19,7 +19,7 @@
           </span>
           <div>
             <p class="eyebrow">Laboratoire de terrain</p>
-            <h1>FORMICA <span>/ SIM V0.4</span></h1>
+            <h1>FORMICA <span>/ SIM V0.5</span></h1>
           </div>
         </div>
         <div class="status-pill"><span></span> Système opérationnel</div>
@@ -35,8 +35,8 @@
 
           <div class="metric-grid">
             <article class="metric metric-wide">
-              <p>Population</p>
-              <strong id="ant-count">0</strong><span>fourmis</span>
+              <p>Fourmis vivantes</p>
+              <strong id="ant-count">0</strong><span>/ <b id="total-ant-count">0</b> individus</span>
             </article>
             <article class="metric">
               <p>Sources</p>
@@ -56,6 +56,22 @@
             </article>
           </div>
 
+          <div class="metabolism-panel">
+            <p class="section-label">Métabolisme</p>
+            <div class="signal-stats">
+              <p><strong id="average-energy">0</strong><span>Énergie moy.</span></p>
+              <p><strong id="minimum-energy">0</strong><span>Minimum</span></p>
+              <p><strong id="dead-ants">0</strong><span>Mortes</span></p>
+            </div>
+            <div class="economy-stats">
+              <p><span>Au repos</span><strong id="resting-ants">0</strong></p>
+              <p><span>Stock alimentaire</span><strong id="food-stock">0</strong></p>
+              <p><span>Consommée</span><strong id="consumed-food">0</strong></p>
+              <p><span>Bilan</span><strong id="food-balance">0</strong></p>
+              <p><span>Collecte / conso.</span><strong id="food-ratio">—</strong></p>
+            </div>
+          </div>
+
           <div class="signal-panel">
             <p class="section-label">Champ de phéromones</p>
             <div class="signal-stats">
@@ -70,6 +86,8 @@
             <p class="section-label">Légende</p>
             <div><span class="legend-dot ant-dot"></span> Fourmi <em>Recherche</em></div>
             <div><span class="legend-dot return-dot"></span> Fourmi <em>Retour au nid</em></div>
+            <div><span class="legend-dot resting-dot"></span> Fourmi <em>Repos / faim</em></div>
+            <div><span class="legend-dot dead-dot"></span> Fourmi <em>Morte</em></div>
             <div><span class="legend-dot nest-dot"></span> Nid <em>Point d'origine</em></div>
             <div><span class="legend-dot food-dot"></span> Nourriture <em>Ressource</em></div>
             <div><span class="legend-dot food-pheromone-dot"></span> FOOD <em>Vers nourriture</em></div>
@@ -78,7 +96,7 @@
 
           <div class="observation">
             <p class="section-label">Observation</p>
-            <p>Les chercheuses déposent HOME. Les retours suivent ce gradient et déposent FOOD, sans GPS global vers le nid.</p>
+            <p>Le mouvement consomme de l'énergie. Les ouvrières affamées suivent HOME, se nourrissent au nid ou meurent si elles l'épuisent.</p>
           </div>
         </aside>
 
@@ -114,7 +132,7 @@
             <p class="sim-time"><span>Temps simulé</span><strong id="sim-time">00:00:00.0</strong></p>
           </div>
           <details class="parameters">
-            <summary>Paramètres de simulation <span>Appliqués au prochain reset</span></summary>
+            <summary>Paramètres de simulation <span>Appliquer redémarre l'expérience</span></summary>
             <form id="parameters-form">
               <label>Fourmis<input id="param-ants" type="number" min="1" max="300" step="1" value="50" /></label>
               <label>Évaporation<input id="param-evaporation" type="number" min="0" max="0.1" step="0.001" value="0.003" /></label>
@@ -123,6 +141,10 @@
               <label>Dépôt HOME<input id="param-home-deposit" type="number" min="0" max="10" step="0.1" value="1.1" /></label>
               <label>Influence piste<input id="param-influence" type="number" min="0" max="1" step="0.01" value="0.62" /></label>
               <label>Exploration<input id="param-exploration" type="number" min="0" max="3" step="0.05" value="1.15" /></label>
+              <label>Coût énergie<input id="param-energy-cost" type="number" min="0" max="0.2" step="0.001" value="0.001" /></label>
+              <label>Seuil retour<input id="param-low-energy" type="number" min="0" max="1" step="0.05" value="0.4" /></label>
+              <label>Énergie / aliment<input id="param-food-energy" type="number" min="1" max="200" step="1" value="30" /></label>
+              <label>Stock initial<input id="param-initial-stock" type="number" min="0" max="1000" step="1" value="10" /></label>
               <button type="submit">Appliquer + Reset</button>
             </form>
           </details>

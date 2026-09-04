@@ -6,6 +6,7 @@ import { Colony } from "../entities/Colony.js";
 import { FoodSource } from "../entities/FoodSource.js";
 import { Nest } from "../entities/Nest.js";
 import { MovementSystem } from "../systems/MovementSystem.js";
+import { MetabolismSystem } from "../systems/MetabolismSystem.js";
 import { FoodCollectionSystem } from "../systems/FoodCollectionSystem.js";
 import { FoodDetectionSystem } from "../systems/FoodDetectionSystem.js";
 import { HomeDetectionSystem } from "../systems/HomeDetectionSystem.js";
@@ -31,6 +32,7 @@ export class Simulation {
     this.foodCollection = new FoodCollectionSystem();
     this.pheromoneDeposit = new PheromoneDepositSystem();
     this.homeDetection = new HomeDetectionSystem();
+    this.metabolism = new MetabolismSystem();
     this.reset();
   }
 
@@ -58,7 +60,11 @@ export class Simulation {
     );
     const nestConfig = this.config.nest;
     const nest = new Nest(nestConfig.x, nestConfig.y, nestConfig.radius);
-    this.colony = new Colony({ id: "C-01", nest });
+    this.colony = new Colony({
+      id: "C-01",
+      nest,
+      initialFoodStock: this.config.initialFoodStock,
+    });
     this.foodSources = this.config.foodSources.map((source) => new FoodSource(source));
     this.initialFoodQuantity = this.foodSources.reduce((total, source) => total + source.quantity, 0);
     this.totalDistance = 0;
@@ -66,6 +72,7 @@ export class Simulation {
     this.totalReturnTicks = 0;
     this.completedReturns = 0;
     this.exploredCells = new Set();
+    this.lostFood = 0;
 
     for (let index = 0; index < this.config.initialAnts; index += 1) {
       const angle = this.random() * Math.PI * 2;
@@ -80,6 +87,9 @@ export class Simulation {
         speed: this.config.antSpeed * (0.75 + this.random() * 0.5),
         colonyId: this.colony.id,
         energy: this.config.antEnergy,
+        maxEnergy: this.config.antMaxEnergy,
+        energyConsumptionRate: this.config.energyConsumptionRate,
+        lowEnergyThreshold: this.config.lowEnergyThreshold,
       }));
     }
     for (const ant of this.colony.ants) this.rememberCell(ant);
@@ -99,6 +109,42 @@ export class Simulation {
       });
     }
     for (const ant of this.colony.ants) {
+      if (ant.state === AntState.DEAD) continue;
+
+      if (ant.state === AntState.RESTING) {
+        if (this.metabolism.consumeEnergy(
+          ant,
+          0,
+          deltaSeconds,
+          this.config.carryingEnergyMultiplier,
+          this.config.basalEnergyConsumptionRate,
+        )) {
+          this.handleDeath(ant);
+          continue;
+        }
+        this.metabolism.feedAtNest(
+          ant,
+          this.colony,
+          this.config.foodEnergyValue,
+          this.config.resumeEnergyThreshold,
+        );
+        continue;
+      }
+
+      if (ant.state === AntState.SEARCHING_FOOD && this.metabolism.needsFood(ant)) {
+        if (this.homeDetection.isInside(ant, this.colony.nest)) {
+          this.metabolism.feedAtNest(
+            ant,
+            this.colony,
+            this.config.foodEnergyValue,
+            this.config.resumeEnergyThreshold,
+          );
+          if (ant.state === AntState.RESTING) continue;
+        } else {
+          this.metabolism.startEnergyReturn(ant);
+        }
+      }
+
       let targetDistance;
       if (ant.state === AntState.RETURNING_HOME) {
         const homeTrail = this.config.pheromonesEnabled && this.config.homePheromonesEnabled
@@ -127,7 +173,18 @@ export class Simulation {
         targetDistance = this.searchFood.update(ant, food, suggestedTrail, deltaSeconds);
       }
 
-      this.totalDistance += this.movement.update(ant, this.world, deltaSeconds, targetDistance);
+      const distance = this.movement.update(ant, this.world, deltaSeconds, targetDistance);
+      this.totalDistance += distance;
+      if (this.metabolism.consumeEnergy(
+        ant,
+        distance,
+        deltaSeconds,
+        this.config.carryingEnergyMultiplier,
+        this.config.basalEnergyConsumptionRate,
+      )) {
+        this.handleDeath(ant);
+        continue;
+      }
       this.rememberCell(ant);
 
       if (ant.state === AntState.RETURNING_HOME) {
@@ -138,6 +195,15 @@ export class Simulation {
           this.completedReturns += 1;
           this.totalReturnTicks += this.tickCount - ant.returnStartedTick;
           ant.returnStartedTick = null;
+        }
+        if (this.homeDetection.isInside(ant, this.colony.nest)
+          && this.metabolism.needsFood(ant)) {
+          this.metabolism.feedAtNest(
+            ant,
+            this.colony,
+            this.config.foodEnergyValue,
+            this.config.resumeEnergyThreshold,
+          );
         }
       } else {
         if (this.homeDetection.isInside(ant, this.colony.nest)) ant.distanceSinceNest = 0;
@@ -154,6 +220,14 @@ export class Simulation {
     if (this.completionTick === null && this.colony.resources === this.initialFoodQuantity) {
       this.completionTick = this.tickCount;
     }
+  }
+
+  handleDeath(ant) {
+    if (ant.carryingFood) {
+      this.lostFood += 1;
+      ant.carryingFood = false;
+    }
+    ant.returnStartedTick = null;
   }
 
   senseTrail(ant, type) {
@@ -188,12 +262,30 @@ export class Simulation {
   getMetrics() {
     const foodPheromones = this.pheromoneField.getStats(PheromoneType.FOOD);
     const homePheromones = this.pheromoneField.getStats(PheromoneType.HOME);
+    const livingAnts = this.colony.ants.filter((ant) => ant.state !== AntState.DEAD);
+    const energies = livingAnts.map((ant) => ant.energy);
+    const averageEnergy = energies.length === 0
+      ? 0
+      : energies.reduce((total, energy) => total + energy, 0) / energies.length;
     return {
       tick: this.tickCount,
-      ants: this.colony.ants.length,
+      ants: livingAnts.length,
+      totalAnts: this.colony.ants.length,
+      livingAnts: livingAnts.length,
+      deadAnts: this.colony.ants.length - livingAnts.length,
+      restingAnts: livingAnts.filter((ant) => ant.state === AntState.RESTING).length,
+      averageEnergy,
+      minimumEnergy: energies.length === 0 ? 0 : Math.min(...energies),
       foodSources: this.foodSources.filter((source) => source.active).length,
       foodRemaining: this.foodSources.reduce((total, source) => total + source.quantity, 0),
       resources: this.colony.resources,
+      foodStock: this.colony.foodStock,
+      consumedFood: this.colony.consumedFood,
+      foodBalance: this.colony.resources - this.colony.consumedFood,
+      collectionConsumptionRatio: this.colony.consumedFood === 0
+        ? null
+        : this.colony.resources / this.colony.consumedFood,
+      lostFood: this.lostFood,
       carryingAnts: this.colony.ants.filter((ant) => ant.carryingFood).length,
       pheromoneTotal: foodPheromones.total + homePheromones.total,
       pheromoneCells: foodPheromones.activeCells + homePheromones.activeCells,

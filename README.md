@@ -1,9 +1,9 @@
 # Formica Sim
 
 Un petit laboratoire visuel pour observer une colonie de fourmis dans un monde
-2D. La V0.4 introduit une écologie à deux signaux : les chercheuses déposent
-`HOME`, suivent `FOOD`, et les fourmis chargées retrouvent le nid grâce au gradient
-collectif plutôt qu'avec une position globale.
+2D. La V0.5 transforme la nourriture en ressource vitale : le déplacement coûte
+de l'énergie, le nid nourrit les ouvrières avec son stock et les individus qui
+atteignent zéro meurent sans être supprimés de la simulation.
 
 ## Lancer le projet
 
@@ -21,16 +21,22 @@ Puis ouvrir <http://localhost:4173>.
 npm test
 ```
 
-Comparer les quatre expériences sur cinq seeds :
+Comparer les quatre régimes énergétiques pendant 50 000 ticks :
 
 ```bash
 npm run benchmark
 ```
 
-Le nombre de seeds et la limite sont configurables, par exemple :
+Le nombre de seeds et la durée sont configurables :
 
 ```bash
-npm run benchmark -- --seeds=100 --limit=100000
+npm run benchmark -- --seeds=10 --ticks=50000
+```
+
+Le benchmark historique des réseaux de phéromones reste disponible :
+
+```bash
+npm run benchmark:pheromones
 ```
 
 ## Architecture
@@ -43,6 +49,7 @@ src/
 ├── simulation/{Simulation,SimulationConfig,World,PheromoneField}.js
 ├── systems/{MovementSystem,FoodDetectionSystem,FoodCollectionSystem}.js
 ├── systems/{PheromoneDepositSystem,PheromoneSensingSystem,HomeDetectionSystem}.js
+├── systems/MetabolismSystem.js
 ├── main.js
 └── styles.css
 ```
@@ -79,7 +86,33 @@ les couches n'arrête jamais leur calcul. Le panneau de paramètres applique ave
 reset la population, l'évaporation, la diffusion, les forces de dépôt,
 l'influence des pistes et l'exploration.
 
-## Benchmark
+## Métabolisme et survie V0.5
+
+Chaque fourmi possède une énergie courante, une énergie maximale, un coût par
+unité de distance et un seuil de retour. Le coût est calculé à partir de la
+distance réellement parcourue ; changer la vitesse d'affichage ×1/×2/×5 ne
+modifie donc pas la physiologie. Le transport de nourriture applique un léger
+surcoût et un métabolisme basal continue au repos.
+
+Sous le seuil de 40 %, une chercheuse interrompt son exploration et remonte
+`HOME` même si elle ne porte rien. Au nid, elle consomme une quantité
+fractionnaire du stock. Elle repart au-dessus du seuil de récupération ou reste
+en `RESTING` si le stock est insuffisant. À zéro énergie, elle passe en `DEAD` :
+elle ne bouge plus, ne collecte plus et ne dépose plus de phéromones, mais reste
+visible sous forme de croix grise.
+
+L'économie conserve séparément :
+
+- la nourriture totale rapportée ;
+- le stock actuellement disponible ;
+- la nourriture consommée ;
+- la nourriture perdue par les porteuses mortes.
+
+Le bilan affiché vaut `nourriture rapportée - nourriture consommée`. Le stock
+initial est volontairement exclu de ce bilan, mais reste inclus dans la loi de
+conservation globale.
+
+## Benchmark des phéromones V0.4
 
 Le benchmark compare :
 
@@ -104,3 +137,21 @@ D — FOOD + HOME + diffusion    7 350 ticks
 Sur les cinq seeds par défaut, les moyennes de collecte sont respectivement
 19 772,2 (A), 5 227 (B), 9 584,8 (C) et 8 082,6 ticks (D). La diffusion réduit
 également l'écart-type du retour sans GPS de 3 665,7 à 1 492 ticks.
+
+## Benchmark de survie V0.5
+
+`npm run benchmark` compare un coût nul, faible, moyen et élevé pendant une durée
+fixe. Il mesure survie, stock final, collecte, consommation, bilan, ratio
+collecte/consommation, mortalité, énergie moyenne et distance moyenne.
+
+Avec la seed par défaut sur 50 000 ticks :
+
+```text
+A — coût nul    DURABLE     50/50 vivantes, stock 250,00
+B — coût faible DURABLE     50/50 vivantes, stock 186,79
+C — coût moyen  FRAGILE     41/50 vivantes, stock   0,00
+D — coût élevé  EXTINCTION   0/50 vivante au tick 40 858
+```
+
+Il n'y a toujours ni reproduction ni démographie : les différences observées
+proviennent uniquement du métabolisme, de la collecte et de la mortalité.

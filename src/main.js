@@ -14,6 +14,15 @@ let previousTime = performance.now();
 const elements = {
   tick: document.querySelector("#tick"),
   ants: document.querySelector("#ant-count"),
+  totalAnts: document.querySelector("#total-ant-count"),
+  deadAnts: document.querySelector("#dead-ants"),
+  restingAnts: document.querySelector("#resting-ants"),
+  averageEnergy: document.querySelector("#average-energy"),
+  minimumEnergy: document.querySelector("#minimum-energy"),
+  foodStock: document.querySelector("#food-stock"),
+  consumedFood: document.querySelector("#consumed-food"),
+  foodBalance: document.querySelector("#food-balance"),
+  foodRatio: document.querySelector("#food-ratio"),
   food: document.querySelector("#food-count"),
   foodRemaining: document.querySelector("#food-remaining"),
   resources: document.querySelector("#resources"),
@@ -37,6 +46,17 @@ function updateMetrics() {
   const metrics = simulation.getMetrics();
   elements.tick.textContent = String(metrics.tick).padStart(6, "0");
   elements.ants.textContent = metrics.ants;
+  elements.totalAnts.textContent = metrics.totalAnts;
+  elements.deadAnts.textContent = metrics.deadAnts;
+  elements.restingAnts.textContent = metrics.restingAnts;
+  elements.averageEnergy.textContent = metrics.averageEnergy.toFixed(1);
+  elements.minimumEnergy.textContent = metrics.minimumEnergy.toFixed(1);
+  elements.foodStock.textContent = metrics.foodStock.toFixed(1);
+  elements.consumedFood.textContent = metrics.consumedFood.toFixed(1);
+  elements.foodBalance.textContent = metrics.foodBalance.toFixed(1);
+  elements.foodRatio.textContent = metrics.collectionConsumptionRatio === null
+    ? "—"
+    : metrics.collectionConsumptionRatio.toFixed(2);
   elements.food.textContent = metrics.foodSources;
   elements.foodRemaining.textContent = metrics.foodRemaining;
   elements.resources.textContent = metrics.resources;
@@ -94,6 +114,10 @@ document.querySelector("#parameters-form").addEventListener("submit", (event) =>
     pheromoneInfluence: Number(document.querySelector("#param-influence").value),
     homeTrailInfluence: Number(document.querySelector("#param-influence").value),
     explorationStrength: Number(document.querySelector("#param-exploration").value),
+    energyConsumptionRate: Number(document.querySelector("#param-energy-cost").value),
+    lowEnergyThreshold: Number(document.querySelector("#param-low-energy").value),
+    foodEnergyValue: Number(document.querySelector("#param-food-energy").value),
+    initialFoodStock: Number(document.querySelector("#param-initial-stock").value),
   });
   accumulator = 0;
   updateMetrics();

@@ -1,4 +1,4 @@
-import { AntState } from "../entities/Ant.js";
+import { AntState, ReturnReason } from "../entities/Ant.js";
 
 function distance(first, second) {
   return Math.hypot(first.x - second.x, first.y - second.y);
@@ -17,6 +17,7 @@ export class FoodCollectionSystem {
     ant.target = null;
     ant.direction += Math.PI;
     ant.recentCells = [];
+    ant.returnReason = ReturnReason.FOOD;
     return true;
   }
 
@@ -24,13 +25,14 @@ export class FoodCollectionSystem {
     if (!ant.carryingFood) return false;
     if (distance(ant.position, colony.nest.position) > colony.nest.radius) return false;
 
-    colony.resources += 1;
+    colony.depositFood(1);
     ant.carryingFood = false;
     ant.state = AntState.SEARCHING_FOOD;
     ant.target = null;
     ant.direction += Math.PI;
     ant.distanceSinceNest = 0;
     ant.recentCells = [];
+    ant.returnReason = null;
     return true;
   }
 }

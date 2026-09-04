@@ -1,4 +1,5 @@
 import { PheromoneType } from "../simulation/PheromoneField.js";
+import { AntState } from "../entities/Ant.js";
 
 export class Renderer {
   constructor(canvas) {
@@ -121,6 +122,14 @@ export class Renderer {
   drawAnt(ctx, ant) {
     ctx.save();
     ctx.translate(ant.position.x, ant.position.y);
+    if (ant.state === AntState.DEAD) {
+      ctx.strokeStyle = "rgba(135, 130, 120, 0.72)";
+      ctx.lineWidth = 1.1;
+      ctx.beginPath(); ctx.moveTo(-3, -2); ctx.lineTo(3, 2); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(-3, 2); ctx.lineTo(3, -2); ctx.stroke();
+      ctx.restore();
+      return;
+    }
     ctx.rotate(ant.direction);
     ctx.strokeStyle = "rgba(240, 180, 95, 0.66)";
     ctx.lineWidth = 0.8;
@@ -132,7 +141,9 @@ export class Renderer {
       ctx.fillStyle = "rgba(164, 195, 100, 0.18)";
       ctx.beginPath(); ctx.arc(-3, 0, 6, 0, Math.PI * 2); ctx.fill();
     }
-    ctx.fillStyle = ant.carryingFood ? "#d8cb78" : "#f0b45f";
+    ctx.fillStyle = ant.state === AntState.RESTING
+      ? "#79a8c8"
+      : ant.carryingFood ? "#d8cb78" : "#f0b45f";
     ctx.beginPath(); ctx.ellipse(-2.5, 0, 3, 2.2, 0, 0, Math.PI * 2); ctx.fill();
     ctx.beginPath(); ctx.arc(2.5, 0, 1.9, 0, Math.PI * 2); ctx.fill();
     if (ant.carryingFood) {
