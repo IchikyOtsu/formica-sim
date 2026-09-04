@@ -16,7 +16,11 @@ import { NestChamberType } from "../src/nest/NestChamber.js";
 import { NestInterior } from "../src/nest/NestInterior.js";
 import { NestTask } from "../src/nest/NestTask.js";
 import { NestTaskSystem } from "../src/nest/NestTaskSystem.js";
+import { NestConstructionSystem } from "../src/nest/NestConstructionSystem.js";
+import { NestNavigationSystem } from "../src/nest/NestNavigationSystem.js";
 import { BroodDemandSystem } from "../src/systems/BroodDemandSystem.js";
+import { drawAnt2D } from "../src/rendering/AntSprite.js";
+import { NestRenderer } from "../src/rendering/NestRenderer.js";
 import { Brood, BroodStage } from "../src/entities/Brood.js";
 import { FoodSource, FoodSourceState } from "../src/entities/FoodSource.js";
 import { DangerZone } from "../src/environment/DangerZone.js";
@@ -3203,4 +3207,277 @@ test("V1.5.2.10 internal-tasks replay is exact for an identical seed and configu
     }));
   };
   assert.deepEqual(runOnce(), runOnce());
+});
+
+// V1.5.3 — Construction dynamique du nid + fourmis 2D orientées.
+
+function constructionConfig(overrides = {}) {
+  return nestInteriorConfig({
+    nestConstructionEnabled: true,
+    reproductionEnabled: false,
+    ...overrides,
+  });
+}
+
+test("V1.5.3.1 NestInterior.addChamber creates a uniquely-identified extra chamber wired by a corridor", () => {
+  const interior = new NestInterior();
+  const before = interior.chambers.size;
+  const corridorsBefore = interior.corridors.length;
+  const first = interior.addChamber(NestChamberType.STORAGE, { x: 90, y: 40 }, NestChamberType.STORAGE);
+  assert.equal(first.id, "STORAGE-2", "the original STORAGE keeps id \"STORAGE\", the first extra becomes STORAGE-2");
+  assert.equal(interior.chambers.size, before + 1);
+  assert.equal(interior.corridors.length, corridorsBefore + 1);
+  assert.deepEqual(interior.corridors.at(-1), [NestChamberType.STORAGE, "STORAGE-2"]);
+
+  const second = interior.addChamber(NestChamberType.STORAGE, { x: -90, y: 40 }, "STORAGE-2");
+  assert.equal(second.id, "STORAGE-3");
+  assert.deepEqual(interior.getChambersByType(NestChamberType.STORAGE).map((chamber) => chamber.id), [
+    NestChamberType.STORAGE, "STORAGE-2", "STORAGE-3",
+  ]);
+});
+
+test("V1.5.3.2 NestInterior.path follows the corridor graph, never a straight line through the nid", () => {
+  const interior = new NestInterior();
+  assert.deepEqual(interior.path(NestChamberType.ENTRANCE, NestChamberType.STORAGE), [
+    NestChamberType.ENTRANCE, NestChamberType.STORAGE,
+  ]);
+  // BROOD and REST are not directly connected on the original 5-chamber star:
+  // the only route is BROOD -> ENTRANCE -> STORAGE -> REST.
+  assert.deepEqual(interior.path(NestChamberType.BROOD, NestChamberType.REST), [
+    NestChamberType.BROOD, NestChamberType.ENTRANCE, NestChamberType.STORAGE, NestChamberType.REST,
+  ]);
+  assert.deepEqual(interior.path(NestChamberType.STORAGE, NestChamberType.STORAGE), [NestChamberType.STORAGE]);
+
+  interior.addChamber(NestChamberType.STORAGE, { x: 90, y: 40 }, NestChamberType.STORAGE);
+  assert.deepEqual(interior.path(NestChamberType.ENTRANCE, "STORAGE-2"), [
+    NestChamberType.ENTRANCE, NestChamberType.STORAGE, "STORAGE-2",
+  ]);
+});
+
+test("V1.5.3.3 NestConstructionSystem only opens a site once every chamber of that type is at capacity", () => {
+  const interior = new NestInterior();
+  const colony = { brood: [starvedLarva("B-1")], foodStock: 100 };
+  const config = { nestChamberCapacity: 2, nestBuildFoodCost: 5, nestMaxConcurrentSites: 1 };
+  const randomFn = () => 0.25;
+  const system = new NestConstructionSystem();
+
+  assert.equal(system.evaluate(colony, interior, config, randomFn), null, "no chamber is full yet");
+
+  interior.getChamber(NestChamberType.STORAGE).occupants.add("A-1");
+  interior.getChamber(NestChamberType.STORAGE).occupants.add("A-2");
+  const site = system.evaluate(colony, interior, config, randomFn);
+  assert.ok(site, "STORAGE just reached capacity, a site must open");
+  assert.equal(site.type, NestChamberType.STORAGE);
+  assert.equal(site.anchorId, NestChamberType.STORAGE);
+  assert.equal(interior.pendingSites.size, 1);
+
+  assert.equal(
+    system.evaluate(colony, interior, config, randomFn),
+    null,
+    "nestMaxConcurrentSites=1 forbids a second concurrent site",
+  );
+});
+
+test("V1.5.3.4 NestConstructionSystem never targets BROOD while the colony has no brood at all", () => {
+  const interior = new NestInterior();
+  interior.getChamber(NestChamberType.BROOD).occupants.add("A-1");
+  interior.getChamber(NestChamberType.BROOD).occupants.add("A-2");
+  const colony = { brood: [], foodStock: 100 };
+  const config = { nestChamberCapacity: 2, nestBuildFoodCost: 5, nestMaxConcurrentSites: 1 };
+  const site = new NestConstructionSystem().evaluate(colony, interior, config, () => 0.5);
+  assert.equal(site, null);
+});
+
+test("V1.5.3.5 a soldier is never assigned BUILD, even with a pending site and free capacity", () => {
+  const decide = new NestTaskSystem().decide;
+  const soldier = new Ant({
+    id: "S", position: { x: 0, y: 0 }, direction: 0, speed: 1, colonyId: "A", caste: Caste.SOLDIER,
+  });
+  const colony = { brood: [], foodStock: 100 };
+  const config = {};
+  const task = decide(soldier, colony, config, {
+    needsFood: false,
+    broodDemand: { hungryLarvae: 0, foodDemand: 0 },
+    activeCaregivers: 0,
+    construction: { siteAvailable: true, activeBuilders: 0, cap: 3 },
+  });
+  assert.equal(task, NestTask.EXIT_NEST);
+});
+
+test("V1.5.3.6 BUILD only kicks in once brood care no longer needs the worker, and respects the builder cap", () => {
+  const decide = new NestTaskSystem().decide;
+  const ant = new Ant({ id: "A", position: { x: 0, y: 0 }, direction: 0, speed: 1, colonyId: "A" });
+  const config = { nestCaregiverRatio: 1, nestBroodFeedStockThreshold: 0 };
+
+  const withHungryBrood = decide(ant, { brood: [starvedLarva("B-1")], foodStock: 100 }, config, {
+    needsFood: false,
+    broodDemand: { hungryLarvae: 1, foodDemand: 1 },
+    activeCaregivers: 0,
+    construction: { siteAvailable: true, activeBuilders: 0, cap: 3 },
+  });
+  assert.equal(withHungryBrood, NestTask.FEED_BROOD, "brood care still outranks construction");
+
+  const noBrood = decide(ant, { brood: [], foodStock: 100 }, config, {
+    needsFood: false,
+    broodDemand: { hungryLarvae: 0, foodDemand: 0 },
+    activeCaregivers: 0,
+    construction: { siteAvailable: true, activeBuilders: 0, cap: 3 },
+  });
+  assert.equal(noBrood, NestTask.BUILD);
+
+  const atCap = decide(ant, { brood: [], foodStock: 100 }, config, {
+    needsFood: false,
+    broodDemand: { hungryLarvae: 0, foodDemand: 0 },
+    activeCaregivers: 0,
+    construction: { siteAvailable: true, activeBuilders: 3, cap: 3 },
+  });
+  assert.equal(atCap, NestTask.EXIT_NEST, "the builder cap is already reached");
+});
+
+test("V1.5.3.7 a full construction cycle: a site opens, gets dug, and becomes a real routable chamber", () => {
+  const simulation = new Simulation(constructionConfig({
+    nestChamberCapacity: 1,
+    nestBuildTicks: 30,
+    nestMaxActiveBuilders: 2,
+  }));
+  const colonyA = simulation.colonies[0];
+  colonyA.foodStock = 100;
+  simulation.initialColonyFoodStock += 100;
+  const interior = simulation.nestInteriors.get(colonyA.id);
+
+  // pack every ant straight into STORAGE so it is immediately "full"
+  for (const ant of colonyA.ants) {
+    simulation.nestTransitionSystem.enter(ant, colonyA, interior);
+    interior.moveAntToChamber(ant, NestChamberType.STORAGE);
+  }
+
+  let sawSite = false;
+  let builtChamberId = null;
+  for (let tick = 0; tick < 4000 && !builtChamberId; tick += 1) {
+    simulation.tick();
+    if (interior.pendingSites.size > 0) sawSite = true;
+    if (colonyA.chambersBuilt > 0) {
+      builtChamberId = interior.getChambersByType(NestChamberType.STORAGE).find((c) => c.id !== NestChamberType.STORAGE)?.id;
+    }
+  }
+
+  assert.equal(sawSite, true, "a construction site must have opened at some point");
+  assert.ok(builtChamberId, "a second STORAGE chamber must have been finalized");
+  assert.equal(interior.pendingSites.size, 0, "the finished site is removed from the pending list");
+  assert.ok(
+    interior.corridors.some(([a, b]) => a === builtChamberId || b === builtChamberId),
+    "the new chamber must be wired into the corridor graph",
+  );
+  // it must now be reachable via the graph, not just a floating chamber
+  const route = interior.path(NestChamberType.ENTRANCE, builtChamberId);
+  assert.equal(route.at(-1), builtChamberId);
+});
+
+test("V1.5.3.8 nestConstructionEnabled = false never creates a chamber or a pending site", () => {
+  const simulation = new Simulation(nestInteriorConfig({ nestConstructionEnabled: false }));
+  const colonyA = simulation.colonies[0];
+  const interior = simulation.nestInteriors.get(colonyA.id);
+  const startingChamberCount = interior.chambers.size;
+  for (let tick = 0; tick < 2000; tick += 1) {
+    simulation.tick();
+    assert.equal(interior.chambers.size, startingChamberCount);
+    assert.equal(interior.pendingSites.size, 0);
+  }
+});
+
+test("V1.5.3.9 food conservation stays exact through a full construction cycle", () => {
+  const simulation = new Simulation(constructionConfig({
+    nestChamberCapacity: 1,
+    nestBuildTicks: 30,
+    nestMaxActiveBuilders: 2,
+  }));
+  const colonyA = simulation.colonies[0];
+  colonyA.foodStock = 100;
+  simulation.initialColonyFoodStock += 100;
+  const interior = simulation.nestInteriors.get(colonyA.id);
+  for (const ant of colonyA.ants) {
+    simulation.nestTransitionSystem.enter(ant, colonyA, interior);
+    interior.moveAntToChamber(ant, NestChamberType.STORAGE);
+  }
+  for (let tick = 0; tick < 4000; tick += 1) {
+    simulation.tick();
+    assertSimulationInvariants(simulation);
+  }
+  assert.ok(colonyA.chambersBuilt > 0, "the scenario must actually have exercised a full build");
+});
+
+test("V1.5.3.10 construction replay is exact for an identical seed and configuration", () => {
+  const config = constructionConfig({ nestChamberCapacity: 1, nestBuildTicks: 30, nestMaxActiveBuilders: 2 });
+  const runOnce = () => {
+    const simulation = new Simulation(config);
+    const colonyA = simulation.colonies[0];
+    colonyA.foodStock = 100;
+    simulation.initialColonyFoodStock += 100;
+    const interior = simulation.nestInteriors.get(colonyA.id);
+    for (const ant of colonyA.ants) {
+      simulation.nestTransitionSystem.enter(ant, colonyA, interior);
+      interior.moveAntToChamber(ant, NestChamberType.STORAGE);
+    }
+    for (let tick = 0; tick < 2000; tick += 1) simulation.tick();
+    return {
+      chambersBuilt: colonyA.chambersBuilt,
+      chamberIds: [...interior.chambers.keys()],
+      corridors: interior.corridors,
+      ants: colonyA.ants.map((ant) => ({
+        locationType: ant.locationType,
+        nestChamberId: ant.nestChamberId,
+        nestTask: ant.nestTask,
+        nestTargetChamberId: ant.nestTargetChamberId,
+        position: ant.position,
+        nestPosition: ant.nestPosition,
+        direction: ant.direction,
+      })),
+    };
+  };
+  assert.deepEqual(runOnce(), runOnce());
+});
+
+test("V1.5.3.11 moving inside the nest orients the ant toward its actual heading", () => {
+  const ant = new Ant({ id: "A", position: { x: 0, y: 0 }, direction: 0, speed: 1, colonyId: "A" });
+  ant.nestPosition = { x: 0, y: 0 };
+  new NestNavigationSystem().moveToward(ant, { x: 10, y: 0 }, 5, 0.1, 1);
+  assert.equal(ant.direction, 0);
+  ant.nestPosition = { x: 0, y: 0 };
+  new NestNavigationSystem().moveToward(ant, { x: 0, y: 10 }, 5, 0.1, 1);
+  assert.equal(ant.direction, Math.PI / 2);
+});
+
+test("V1.5.3.12 drawAnt2D renders every caste/state combination without throwing", () => {
+  const noop = () => {};
+  const ctx = new Proxy({}, { get: () => noop });
+  for (const caste of [Caste.WORKER, Caste.SOLDIER]) {
+    for (const flags of [
+      {},
+      { carrying: true },
+      { resting: true },
+      { tending: true },
+      { building: true },
+    ]) {
+      assert.doesNotThrow(() => drawAnt2D(ctx, { x: 0, y: 0, angle: 1.2, caste, ...flags }));
+    }
+  }
+});
+
+test("V1.5.3.13 NestRenderer draws a growing nest (extra chambers, a pending site) without throwing", () => {
+  const simulation = new Simulation(constructionConfig({ nestChamberCapacity: 1, nestBuildTicks: 30 }));
+  const colonyA = simulation.colonies[0];
+  colonyA.foodStock = 100;
+  simulation.initialColonyFoodStock += 100;
+  const interior = simulation.nestInteriors.get(colonyA.id);
+  for (const ant of colonyA.ants) {
+    simulation.nestTransitionSystem.enter(ant, colonyA, interior);
+    interior.moveAntToChamber(ant, NestChamberType.STORAGE);
+  }
+  for (let tick = 0; tick < 400; tick += 1) simulation.tick();
+  assert.ok(interior.pendingSites.size > 0 || interior.chambers.size > 5, "something must be under construction by now");
+
+  const noop = () => {};
+  const ctx = new Proxy({}, { get: () => noop });
+  const canvas = { width: 300, height: 200 };
+  assert.doesNotThrow(() => new NestRenderer().render(ctx, canvas, colonyA, interior, simulation.tickCount));
 });

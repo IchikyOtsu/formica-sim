@@ -4,5 +4,6 @@ export const NestTask = Object.freeze({
   GO_TO_REST: "GO_TO_REST",
   FEED_BROOD: "FEED_BROOD",
   TEND_BROOD: "TEND_BROOD",
+  BUILD: "BUILD",
   EXIT_NEST: "EXIT_NEST",
 });

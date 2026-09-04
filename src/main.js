@@ -235,6 +235,8 @@ function renderColonyMetrics(colonies) {
       ["Au stockage", colony.antsInStorage],
       ["Nourrices / Soigneuses", `${colony.antsFeedingBrood} / ${colony.antsTendingBrood}`],
       ["Nourriture livrée au couvain", colony.broodFoodDelivered.toFixed(1)],
+      ["Bâtisseuses", colony.antsBuilding],
+      ["Chambres construites / chantiers", `${colony.chambersBuilt} / ${colony.pendingConstructionSites}`],
     ];
     for (const [label, value] of rows) {
       const term = document.createElement("dt");
@@ -310,7 +312,7 @@ function frame(now) {
         const interior = simulation.nestInteriors.get(viewMode);
         if (colony && interior) {
           renderer.resize();
-          nestRenderer.render(renderer.context, renderer.canvas, colony, interior);
+          nestRenderer.render(renderer.context, renderer.canvas, colony, interior, simulation.tickCount);
         }
       }
     } catch (error) {
@@ -458,6 +460,7 @@ document.querySelector("#parameters-form").addEventListener("submit", (event) =>
     minStockToRaid: Number(document.querySelector("#param-min-stock-to-raid").value),
     raidCooldownTicks: Number(document.querySelector("#param-raid-cooldown").value),
     nestInteriorEnabled: document.querySelector("#param-nest-interior-enabled").checked,
+    nestConstructionEnabled: document.querySelector("#param-nest-construction-enabled").checked,
   });
   resetAnalytics();
   accumulator = 0;
@@ -523,6 +526,7 @@ function applyConfigToForm(config) {
   document.querySelector("#param-combat-enabled").checked = config.combatEnabled;
   document.querySelector("#param-castes-enabled").checked = config.castesEnabled;
   document.querySelector("#param-nest-interior-enabled").checked = config.nestInteriorEnabled;
+  document.querySelector("#param-nest-construction-enabled").checked = config.nestConstructionEnabled;
   document.querySelector("#param-pillage-enabled").checked = config.pillageEnabled;
   document.querySelector("#param-auto-raid-enabled").checked = config.autoRaidEnabled;
 }

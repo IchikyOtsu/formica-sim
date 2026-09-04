@@ -222,3 +222,126 @@ ramassage/livraison forcé.
   `nestInternalFoodCarry`, `nestTendBroodTicks`, `nestBroodCareBonus`) non
   exposés dans le panneau de paramètres web — seulement en configuration,
   comme la majorité des réglages fins de raid/combat déjà non exposés.
+
+## V1.5.3 — Construction dynamique du nid + fourmis 2D orientées
+
+Opt-in comme toujours : `nestConstructionEnabled` (défaut `false`). À `false`,
+`NestInterior` reste strictement les cinq chambres fixes de V1.5.1 — vérifié
+explicitement (183/183 tests, dont un test dédié qui tick 2000 fois et
+n'observe jamais un chantier ni une sixième chambre).
+
+### `NestInterior` devient un graphe, pas une étoile figée
+
+Changement structurel : `chambers` est maintenant indexé par un **ID unique**,
+plus par type — la construction dynamique peut créer plusieurs chambres du
+même type (`STORAGE-2`, `STORAGE-3`, ...). Les cinq chambres d'origine
+gardent leur type comme ID (`"STORAGE"`), donc toute l'API de V1.5.1/V1.5.2
+(`getChamber(id)`, `moveAntToChamber`) continue de fonctionner à l'identique
+sans qu'aucune construction n'ait eu lieu — c'est ce qui garantit la
+non-régression.
+
+- `getChambersByType(type)` — toutes les chambres d'un type donné.
+- `addChamber(type, position, anchorId)` — finalise un chantier en vraie
+  chambre, ajoute un corridor `[anchorId, nouvelId]`.
+- `path(fromId, toId)` — plus court chemin **via les corridors existants**
+  (BFS), jamais une ligne droite à travers le nid. C'est le changement de
+  navigation demandé : même sans aucune construction, les fourmis suivent
+  maintenant visuellement les corridors dessinés au lieu de couper en
+  diagonale à travers les chambres (BROOD → REST passe par
+  ENTRANCE → STORAGE, exactement comme les traits affichés le montrent).
+  Vérifié que ce changement ne casse aucun test existant : les tests
+  n'affirment jamais un trajet ou un nombre de ticks exact, seulement l'état
+  final (dépôt à STORAGE, sortie, etc.).
+
+### Qui décide quand construire
+
+`NestConstructionSystem.evaluate()` (nouveau) — une photo instantanée par
+tick : pour STORAGE/REST/BROOD, si même la variante la moins chargée de ce
+type a atteint `nestChamberCapacity` fourmis **physiquement présentes**, et
+qu'aucun chantier de ce type n'est déjà ouvert, et qu'il reste de la place
+sous `nestMaxConcurrentSites`, un chantier s'ouvre — position déterministe
+via un flux RNG dédié (`Simulation.constructionRandom`, seedé séparément de
+tous les autres flux existants pour ne perturber aucun tirage déjà testé),
+à `nestChamberSpacing` de la chambre-ancre. BROOD n'est jamais ciblé si la
+colonie n'a aucun couvain.
+
+### Qui creuse
+
+`NestTaskSystem.decide()` gagne un cinquième palier, `BUILD`, **après**
+`FEED_BROOD`/`TEND_BROOD` et avant `EXIT_NEST` — les soins au couvain
+passent toujours en premier. Réservé aux ouvrières (jamais un soldat),
+plafonné par `nestMaxActiveBuilders` par colonie (pas par chantier — au
+départ un seul chantier concurrent par défaut, donc équivalent). Une
+bâtisseuse marche en ligne directe vers la position du chantier (il n'existe
+pas encore de corridor vers un endroit qui n'existe pas encore), puis
+incrémente `site.progress` de 1 par tick de présence — plusieurs bâtisseuses
+accélèrent réellement le chantier. Une fois `progress >= nestBuildTicks`,
+`Simulation.updateBuildingAnt` finalise : `interior.addChamber(...)`, coût
+en nourriture prélevé via `colony.consumeFood()` (même mécanisme que le coût
+d'un œuf — une vraie consommation, pas une nouvelle réserve à suivre dans
+`Invariants.js`), et **toutes** les bâtisseuses de ce chantier (pas
+seulement celle qui vient de finir) sont libérées le même tick, y compris
+celles pas encore traitées dans la boucle de ce tick.
+
+### Routage : une chambre précise, pas juste un type
+
+`ensureNestRoute()` choisit, parmi les chambres du type visé, celle qui a le
+moins d'occupantes (répartition de charge simple), puis calcule le chemin
+via `interior.path()` — recalculé uniquement quand le type visé change (une
+nouvelle tâche, ou le passage STORAGE → BROOD de `FEED_BROOD` une fois la
+charge ramassée), jamais à chaque tick.
+
+### Fourmis 2D orientées (`AntSprite.drawAnt2D`)
+
+Nouveau `src/rendering/AntSprite.js`, sans dépendance externe (Canvas pur,
+comme tout le reste du projet) : tête/thorax/abdomen + 6 pattes, orienté via
+`ctx.rotate(ant.direction)`. `ant.direction` est le **même champ** que celui
+déjà utilisé dehors — `NestNavigationSystem.moveToward` le met à jour à
+chaque pas, donc la fourmi tourne réellement selon son cap réel dans le
+corridor, sans nouveau champ ni duplication d'état. Soldat vs ouvrière :
+tête et thorax plus larges. Postures : `resting` (aplatie, immobile),
+`tending`/`building` (halo distinct), `carrying` (petit point porté). Léger
+balancement des pattes dérivé de `tickCount` + un hash déterministe de
+l'ID de la fourmi — aucun état d'animation supplémentaire à faire persister
+ou à répliquer.
+
+Pas d'interpolation sous-tick séparée : le mouvement était déjà incrémental
+tick par tick (V1.5.1), et à `tickDurationMs=100` avec les vitesses
+intérieures par défaut, un pas fait 2-3 unités sur une vue d'environ
+200 unités de large — assez fin pour rester lisible sans double-buffering.
+Le vrai changement de fluidité vient d'ailleurs : la marche suit maintenant
+les corridors (`path()`) au lieu de sauter en diagonale d'une chambre à
+l'autre.
+
+### `NestRenderer` : échelle dynamique
+
+L'échelle fixe (`220` unités) de V1.5.1 ne suffit plus dès que le nid
+grandit par construction. `computeBounds()` calcule la boîte englobante de
+toutes les chambres + chantiers en cours à chaque frame et recadre dessus —
+un nid à 5 chambres fixes se comporte visuellement presque comme avant, un
+nid qui a construit 3 chambres supplémentaires reste entièrement visible.
+Un chantier en cours se dessine en pointillés avec un petit arc de
+progression.
+
+### Non fait volontairement (V1.5.3)
+
+- Pas de vraies contraintes géométriques (chevauchement de chambres,
+  collision de corridors) — la position d'un chantier est un simple offset
+  déterministe depuis son ancre, jamais vérifiée contre les autres chambres.
+  Sur un nid qui construit beaucoup, deux chambres pourraient visuellement
+  se chevaucher ; accepté comme limite du modèle "abstrait" assumé depuis
+  V1.5.1.
+- QUEEN et ENTRANCE ne sont jamais dupliquées (pas dans
+  `CONSTRUCTIBLE_TYPES`) — une seule reine, un seul point d'entrée.
+- `NestRenderer.drawQueen`/`drawBrood` placent toujours leurs marqueurs dans
+  la chambre QUEEN/BROOD **d'origine** — si une deuxième chambre BROOD est
+  construite, les ouvrières peuvent réellement y travailler, mais les points
+  décoratifs représentant le couvain ne s'y dessinent pas (le couvain n'a de
+  toute façon aucune position individuelle suivie, V1.5.1).
+  `nestChamberCapacity` n'est PAS le même champ que `NestChamber.capacity`
+  (toujours informative, jamais appliquée) — c'est un seuil de déclenchement
+  de construction indépendant, plus simple que de fiabiliser une capacité
+  par chambre.
+- Pas de creusement "gratuit" : chaque chambre construite coûte
+  `nestBuildFoodCost`, mais ce n'est qu'un coût forfaitaire déduit à la
+  finalisation, pas un vrai budget matériaux suivi dans le temps.

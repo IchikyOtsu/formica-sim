@@ -77,5 +77,9 @@ export class Ant {
     this.nestTransitionCooldown = 0;
     this.internalFoodCargo = 0;
     this.nestTendTicksRemaining = 0;
+    this.nestPath = null;
+    this.nestPathIndex = 0;
+    this.nestTargetChamberId = null;
+    this.nestBuildSiteId = null;
   }
 }

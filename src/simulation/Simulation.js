@@ -34,6 +34,7 @@ import { NestTask } from "../nest/NestTask.js";
 import { NestNavigationSystem } from "../nest/NestNavigationSystem.js";
 import { NestTransitionSystem } from "../nest/NestTransitionSystem.js";
 import { NestTaskSystem } from "../nest/NestTaskSystem.js";
+import { NestConstructionSystem } from "../nest/NestConstructionSystem.js";
 import { BroodDemandSystem } from "../systems/BroodDemandSystem.js";
 import { normalizeConfig, toVersionedConfig } from "../config/ConfigSchema.js";
 import { DEFAULT_CONFIG } from "./SimulationConfig.js";
@@ -88,6 +89,7 @@ export class Simulation {
     this.nestTransitionSystem = new NestTransitionSystem();
     this.nestTaskSystem = new NestTaskSystem();
     this.broodDemandSystem = new BroodDemandSystem();
+    this.nestConstructionSystem = new NestConstructionSystem();
     this.reset();
   }
 
@@ -104,6 +106,7 @@ export class Simulation {
     this.sensingRandom = seededRandom(this.config.seed ^ 0x9e3779b9);
     this.birthRandom = seededRandom(this.config.seed ^ 0x85ebca6b);
     this.environmentRandom = seededRandom(this.config.seed ^ 0xc2b2ae35);
+    this.constructionRandom = seededRandom(this.config.seed ^ 0x2f6e9a17);
     this.randomWalk = new RandomWalk(this.random, this.config.explorationStrength);
     this.searchFood = new SearchFoodBehavior(this.randomWalk, this.config.pheromoneInfluence);
     this.returnHome = new ReturnHomeBehavior(this.randomWalk, this.config.homeTrailInfluence);
@@ -315,6 +318,7 @@ export class Simulation {
       this.detectEnemyNests(colony, colonyConfig);
       this.detectNestThreats(colony, colonyConfig);
       this.evaluateAutoRaid(colony, colonyConfig);
+      const interior = this.nestInteriors.get(colony.id);
       const broodDemand = colonyConfig.nestInteriorEnabled
         ? this.broodDemandSystem.evaluate(colony, colonyConfig)
         : null;
@@ -322,14 +326,23 @@ export class Simulation {
         ? colony.ants.filter((candidate) => candidate.locationType === "NEST"
           && (candidate.nestTask === NestTask.FEED_BROOD || candidate.nestTask === NestTask.TEND_BROOD)).length
         : 0;
+      let activeBuilders = 0;
+      if (colonyConfig.nestConstructionEnabled) {
+        this.nestConstructionSystem.evaluate(colony, interior, colonyConfig, this.constructionRandom);
+        activeBuilders = colony.ants.filter((candidate) => candidate.nestTask === NestTask.BUILD).length;
+      }
       for (const ant of colony.ants) {
       if (ant.state === AntState.DEAD) continue;
       if (ant.locationType === "NEST") {
         const caregiverBefore = ant.nestTask === NestTask.FEED_BROOD || ant.nestTask === NestTask.TEND_BROOD;
-        this.updateNestAnt(ant, colony, colonyConfig, deltaSeconds, broodDemand, activeCaregivers);
+        const builderBefore = ant.nestTask === NestTask.BUILD;
+        this.updateNestAnt(ant, colony, colonyConfig, deltaSeconds, interior, broodDemand, activeCaregivers, activeBuilders);
         const caregiverAfter = ant.nestTask === NestTask.FEED_BROOD || ant.nestTask === NestTask.TEND_BROOD;
         if (caregiverAfter && !caregiverBefore) activeCaregivers += 1;
         else if (!caregiverAfter && caregiverBefore) activeCaregivers -= 1;
+        const builderAfter = ant.nestTask === NestTask.BUILD;
+        if (builderAfter && !builderBefore) activeBuilders += 1;
+        else if (!builderAfter && builderBefore) activeBuilders -= 1;
         continue;
       }
       if (this.config.combatEnabled && ant.combatCooldown > 0) ant.combatCooldown -= 1;
@@ -660,6 +673,10 @@ export class Simulation {
       ant.nestChamberId = null;
       ant.nestTask = "NONE";
       ant.nestTendTicksRemaining = 0;
+      ant.nestPath = null;
+      ant.nestPathIndex = 0;
+      ant.nestTargetChamberId = null;
+      ant.nestBuildSiteId = null;
     }
   }
 
@@ -806,8 +823,7 @@ export class Simulation {
     return Math.hypot(dx, dy);
   }
 
-  updateNestAnt(ant, colony, colonyConfig, deltaSeconds, broodDemand, activeCaregivers) {
-    const interior = this.nestInteriors.get(colony.id);
+  updateNestAnt(ant, colony, colonyConfig, deltaSeconds, interior, broodDemand, activeCaregivers, activeBuilders) {
     ant.age += deltaSeconds;
     if (ant.nestTransitionCooldown > 0) ant.nestTransitionCooldown -= 1;
     if (this.config.combatEnabled && ant.combatCooldown > 0) ant.combatCooldown -= 1;
@@ -839,19 +855,34 @@ export class Simulation {
       return;
     }
 
-    if (ant.nestTask === NestTask.NONE) this.assignNestTask(ant, colony, colonyConfig, broodDemand, activeCaregivers);
+    if (ant.nestTask === NestTask.BUILD) {
+      this.updateBuildingAnt(ant, colony, colonyConfig, deltaSeconds, interior);
+      return;
+    }
 
-    const targetType = this.chamberTypeForAnt(ant);
-    const chamber = interior.getChamber(targetType);
-    const arrived = this.nestNavigationSystem.moveToward(
+    if (ant.nestTask === NestTask.NONE) {
+      this.assignNestTask(ant, colony, colonyConfig, interior, broodDemand, activeCaregivers, activeBuilders);
+    }
+
+    this.ensureNestRoute(ant, colony, interior);
+    const waypoint = ant.nestPath[ant.nestPathIndex];
+    const arrivedWaypoint = this.nestNavigationSystem.moveToward(
       ant,
-      chamber.position,
+      waypoint,
       colonyConfig.nestInteriorSpeed,
       deltaSeconds,
       colonyConfig.nestChamberArrivalRadius,
     );
-    if (!arrived) return;
-    interior.moveAntToChamber(ant, targetType);
+    if (!arrivedWaypoint) return;
+    if (ant.nestPathIndex < ant.nestPath.length - 1) {
+      ant.nestPathIndex += 1;
+      return;
+    }
+
+    const targetType = this.resolveDesiredNestType(ant);
+    interior.moveAntToChamber(ant, ant.nestTargetChamberId);
+    ant.nestPath = null;
+    ant.nestPathIndex = 0;
 
     if (targetType === NestChamberType.STORAGE) {
       if (ant.nestTask === NestTask.FEED_BROOD) {
@@ -891,15 +922,60 @@ export class Simulation {
     if (ant.nestTendTicksRemaining <= 0) ant.nestTask = NestTask.NONE;
   }
 
-  assignNestTask(ant, colony, colonyConfig, broodDemand, activeCaregivers) {
-    ant.nestTask = this.nestTaskSystem.decide(ant, colony, colonyConfig, {
+  updateBuildingAnt(ant, colony, colonyConfig, deltaSeconds, interior) {
+    const site = interior.pendingSites.get(ant.nestBuildSiteId);
+    if (!site) {
+      // le chantier a disparu entre-temps (terminé par d'autres ouvrières
+      // ce même tick) — la fourmi redécide normalement au tick suivant.
+      ant.nestTask = NestTask.NONE;
+      ant.nestBuildSiteId = null;
+      return;
+    }
+    const arrived = this.nestNavigationSystem.moveToward(
+      ant,
+      site.position,
+      colonyConfig.nestInteriorSpeed,
+      deltaSeconds,
+      colonyConfig.nestChamberArrivalRadius,
+    );
+    if (!arrived) return;
+    site.progress += 1;
+    if (site.progress < site.requiredProgress) return;
+
+    const chamber = interior.addChamber(site.type, site.position, site.anchorId);
+    interior.pendingSites.delete(site.id);
+    colony.consumeFood(Math.min(colonyConfig.nestBuildFoodCost, colony.foodStock));
+    colony.chambersBuilt += 1;
+    this.emitEvent("NEST_CHAMBER_BUILT", {
+      colonyId: colony.id,
+      chamberId: chamber.id,
+      chamberType: chamber.type,
+    });
+    for (const builder of colony.ants) {
+      if (builder.nestBuildSiteId === site.id) {
+        builder.nestTask = NestTask.NONE;
+        builder.nestBuildSiteId = null;
+      }
+    }
+  }
+
+  assignNestTask(ant, colony, colonyConfig, interior, broodDemand, activeCaregivers, activeBuilders) {
+    const pendingSite = colonyConfig.nestConstructionEnabled
+      ? interior.pendingSites.values().next().value ?? null
+      : null;
+    const task = this.nestTaskSystem.decide(ant, colony, colonyConfig, {
       needsFood: this.metabolism.needsFood(ant),
       broodDemand: broodDemand ?? { hungryLarvae: 0, foodDemand: 0 },
       activeCaregivers: activeCaregivers ?? 0,
+      construction: pendingSite
+        ? { siteAvailable: true, activeBuilders: activeBuilders ?? 0, cap: colonyConfig.nestMaxActiveBuilders }
+        : { siteAvailable: false, activeBuilders: 0, cap: 0 },
     });
+    ant.nestTask = task;
+    ant.nestBuildSiteId = task === NestTask.BUILD ? pendingSite.id : null;
   }
 
-  chamberTypeForAnt(ant) {
+  resolveDesiredNestType(ant) {
     switch (ant.nestTask) {
       case NestTask.GO_TO_STORAGE: return NestChamberType.STORAGE;
       case NestTask.GO_TO_REST: return NestChamberType.REST;
@@ -908,6 +984,28 @@ export class Simulation {
       case NestTask.TEND_BROOD: return NestChamberType.BROOD;
       default: return NestChamberType.ENTRANCE;
     }
+  }
+
+  // Choisit, parmi les chambres du type visé, celle qui a le moins
+  // d'occupantes actuellement (répartition de charge simple) — puis calcule
+  // le chemin réel via les corridors existants jusqu'à cette chambre.
+  // Recalculé uniquement quand le type visé change (une nouvelle tâche, ou
+  // le passage STORAGE -> BROOD de FEED_BROOD une fois la charge ramassée),
+  // jamais à chaque tick.
+  ensureNestRoute(ant, colony, interior) {
+    const desiredType = this.resolveDesiredNestType(ant);
+    const currentTargetType = ant.nestTargetChamberId
+      ? interior.chambers.get(ant.nestTargetChamberId)?.type
+      : null;
+    if (ant.nestPath && currentTargetType === desiredType) return;
+    const candidates = interior.getChambersByType(desiredType);
+    const targetChamber = candidates.reduce((best, chamber) => (
+      chamber.occupants.size < best.occupants.size ? chamber : best
+    ), candidates[0]);
+    const fromId = ant.nestChamberId ?? NestChamberType.ENTRANCE;
+    ant.nestTargetChamberId = targetChamber.id;
+    ant.nestPath = interior.path(fromId, targetChamber.id).map((id) => ({ ...interior.getChamber(id).position }));
+    ant.nestPathIndex = 0;
   }
 
   depositAtStorage(ant, colony) {
@@ -1628,8 +1726,11 @@ export class Simulation {
       antsInBroodChamber: livingAnts.filter((ant) => ant.nestChamberId === NestChamberType.BROOD).length,
       antsFeedingBrood: livingAnts.filter((ant) => ant.nestTask === NestTask.FEED_BROOD).length,
       antsTendingBrood: livingAnts.filter((ant) => ant.nestTask === NestTask.TEND_BROOD).length,
+      antsBuilding: livingAnts.filter((ant) => ant.nestTask === NestTask.BUILD).length,
       broodFoodBuffer: colony.broodFoodBuffer,
       broodFoodDelivered: colony.broodFoodDelivered,
+      chambersBuilt: colony.chambersBuilt,
+      pendingConstructionSites: this.nestInteriors.get(colony.id)?.pendingSites.size ?? 0,
       foodPheromones,
       homePheromones,
       alarmPheromones,

@@ -7,17 +7,22 @@ import { Caste } from "../entities/Ant.js";
 // couvain > sortir. Purement fonction de l'état courant, donc déterministe et
 // testable isolément.
 export class NestTaskSystem {
-  decide(ant, colony, colonyConfig, { needsFood, broodDemand, activeCaregivers }) {
+  decide(ant, colony, colonyConfig, { needsFood, broodDemand, activeCaregivers, construction }) {
     if (ant.carryingFood || ant.raidCargo > 0) return NestTask.GO_TO_STORAGE;
     if (needsFood) return NestTask.GO_TO_REST;
 
-    if (ant.caste !== Caste.SOLDIER && colony.brood.length > 0) {
-      const caregiverCap = Math.max(1, Math.ceil(colony.brood.length * colonyConfig.nestCaregiverRatio));
-      if (activeCaregivers < caregiverCap) {
-        if (broodDemand.hungryLarvae > 0 && colony.foodStock >= colonyConfig.nestBroodFeedStockThreshold) {
-          return NestTask.FEED_BROOD;
+    if (ant.caste !== Caste.SOLDIER) {
+      if (colony.brood.length > 0) {
+        const caregiverCap = Math.max(1, Math.ceil(colony.brood.length * colonyConfig.nestCaregiverRatio));
+        if (activeCaregivers < caregiverCap) {
+          if (broodDemand.hungryLarvae > 0 && colony.foodStock >= colonyConfig.nestBroodFeedStockThreshold) {
+            return NestTask.FEED_BROOD;
+          }
+          return NestTask.TEND_BROOD;
         }
-        return NestTask.TEND_BROOD;
+      }
+      if (construction?.siteAvailable && construction.activeBuilders < construction.cap) {
+        return NestTask.BUILD;
       }
     }
 

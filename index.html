@@ -260,6 +260,8 @@
               <label>Cooldown raid<input id="param-raid-cooldown" type="number" min="0" max="100000" step="100" value="1500" /></label>
               <label class="check-label">Vue intérieure du nid<input id="param-nest-interior-enabled" type="checkbox" /></label>
               <p class="field-hint">Bascule ensuite sur « Vue → Nid A/B » pour observer l'intérieur : entrée, stockage, repos, sortie.</p>
+              <label class="check-label">Construction dynamique<input id="param-nest-construction-enabled" type="checkbox" /></label>
+              <p class="field-hint">Nécessite la vue intérieure du nid. Quand une chambre est pleine, des ouvrières creusent une chambre supplémentaire du même type, reliée par un nouveau corridor.</p>
               <button type="submit">Appliquer + Reset</button>
             </form>
           </details>

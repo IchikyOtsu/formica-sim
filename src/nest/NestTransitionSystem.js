@@ -19,6 +19,10 @@ export class NestTransitionSystem {
     ant.nestPosition = null;
     ant.nestChamberId = null;
     ant.nestTask = "NONE";
+    ant.nestPath = null;
+    ant.nestPathIndex = 0;
+    ant.nestTargetChamberId = null;
+    ant.nestBuildSiteId = null;
     ant.nestTransitionCooldown = colonyConfig.nestTransitionCooldownTicks;
     const angle = randomFn() * Math.PI * 2;
     const offset = colony.nest.radius * 0.6;

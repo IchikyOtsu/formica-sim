@@ -64,6 +64,9 @@ export const CONFIG_SECTIONS = Object.freeze({
     "nestInteriorEnabled", "nestInteriorSpeed", "nestChamberArrivalRadius",
     "nestTransitionCooldownTicks", "nestCaregiverRatio", "nestBroodFeedStockThreshold",
     "nestInternalFoodCarry", "nestTendBroodTicks", "nestBroodCareBonus",
+    "nestConstructionEnabled", "nestChamberCapacity", "nestBuildTicks",
+    "nestBuildFoodCost", "nestChamberSpacing", "nestMaxConcurrentSites",
+    "nestMaxActiveBuilders",
   ]),
   demography: Object.freeze([
     "initialFoodStock", "reproductionEnabled", "queenLayingCooldownTicks",
@@ -133,7 +136,7 @@ export function validateFlatConfig(config) {
     "pheromoneCellSize", "pheromoneMaxIntensity", "seasonDurationTicks", "territoryFalloffDistance",
     "combatRadius", "combatMaxHealth", "soldierMaxHealth",
     "nestDiscoveryRadius", "raidArrivalRadius", "nestDefenseRadius",
-    "nestInteriorSpeed", "nestChamberArrivalRadius",
+    "nestInteriorSpeed", "nestChamberArrivalRadius", "nestChamberSpacing",
   ]) {
     if (config[key] <= 0) fail(key, "doit être positif");
   }
@@ -153,6 +156,7 @@ export function validateFlatConfig(config) {
     "threatPressureRatioScale", "nestDefenseAlarmStrength", "threatPressureNestProximityWeight",
     "raidCarryCapacity", "minStockToRaid",
     "nestBroodFeedStockThreshold", "nestInternalFoodCarry", "nestBroodCareBonus",
+    "nestBuildFoodCost",
   ]) {
     if (config[key] < 0) fail(key, "ne peut pas être négatif");
   }
@@ -196,6 +200,18 @@ export function validateFlatConfig(config) {
   }
   if (!Number.isInteger(config.nestTendBroodTicks) || config.nestTendBroodTicks <= 0) {
     fail("nestTendBroodTicks", "entier positif attendu");
+  }
+  if (!Number.isInteger(config.nestChamberCapacity) || config.nestChamberCapacity <= 0) {
+    fail("nestChamberCapacity", "entier positif attendu");
+  }
+  if (!Number.isInteger(config.nestBuildTicks) || config.nestBuildTicks <= 0) {
+    fail("nestBuildTicks", "entier positif attendu");
+  }
+  if (!Number.isInteger(config.nestMaxConcurrentSites) || config.nestMaxConcurrentSites <= 0) {
+    fail("nestMaxConcurrentSites", "entier positif attendu");
+  }
+  if (!Number.isInteger(config.nestMaxActiveBuilders) || config.nestMaxActiveBuilders <= 0) {
+    fail("nestMaxActiveBuilders", "entier positif attendu");
   }
   if (!Number.isInteger(config.seed)) fail("seed", "entier attendu");
   if (!Number.isInteger(config.territoryUpdateInterval)) {

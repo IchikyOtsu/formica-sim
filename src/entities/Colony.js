@@ -54,6 +54,7 @@ export class Colony {
     this.nextRaidEligibleTick = 0;
     this.broodFoodBuffer = 0;
     this.broodFoodDelivered = 0;
+    this.chambersBuilt = 0;
   }
 
   depositFood(amount) {
