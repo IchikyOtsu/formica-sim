@@ -16,7 +16,7 @@ export function inspectSimulationInvariants(simulation) {
       add("worker-health-bounds", `${ant.id}: ${ant.health}`);
     }
     if (!simulation.world.contains(ant.position)) add("worker-inside-world", ant.id);
-    if (ant.state === AntState.DEAD && (ant.carryingFood || ant.target !== null)) {
+    if (ant.state === AntState.DEAD && (ant.carryingFood || ant.target !== null || ant.raidId !== null)) {
       add("dead-worker-inert", ant.id);
     }
     if (ant.state !== AntState.DEAD && ant.health <= 0) {
@@ -24,6 +24,17 @@ export function inspectSimulationInvariants(simulation) {
     }
     if (ant.caste === Caste.SOLDIER && ant.carryingFood) {
       add("soldier-never-forages", ant.id);
+    }
+    if (ant.state === AntState.RAIDING && ant.caste !== Caste.SOLDIER) {
+      add("raider-must-be-soldier", ant.id);
+    }
+  }
+  for (const colony of simulation.colonies) {
+    for (const [targetColonyId, intel] of colony.knownEnemyNests) {
+      if (targetColonyId === colony.id) add("no-self-nest-intel", colony.id);
+      if (!Number.isFinite(intel.position.x) || !Number.isFinite(intel.position.y)) {
+        add("nest-intel-position-finite", `${colony.id}:${targetColonyId}`);
+      }
     }
   }
   for (const colony of simulation.colonies) {

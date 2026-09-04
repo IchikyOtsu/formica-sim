@@ -25,6 +25,8 @@ import { PheromoneDepositSystem } from "../systems/PheromoneDepositSystem.js";
 import { PheromoneSensingSystem } from "../systems/PheromoneSensingSystem.js";
 import { ForeignAntDetectionSystem } from "../systems/ForeignAntDetectionSystem.js";
 import { EncounterReactionSystem, EncounterReaction } from "../systems/EncounterReactionSystem.js";
+import { RaidSystem } from "../systems/RaidSystem.js";
+import { RaidState } from "../entities/Raid.js";
 import { normalizeConfig, toVersionedConfig } from "../config/ConfigSchema.js";
 import { DEFAULT_CONFIG } from "./SimulationConfig.js";
 import { ColonyPheromoneFields } from "./ColonyPheromoneFields.js";
@@ -72,6 +74,7 @@ export class Simulation {
     this.hazard = new HazardSystem();
     this.foreignAntDetection = new ForeignAntDetectionSystem();
     this.encounterReaction = new EncounterReactionSystem();
+    this.raidSystem = new RaidSystem();
     this.reset();
   }
 
@@ -192,6 +195,7 @@ export class Simulation {
     this.currentForeignContacts = [];
     this.newCombatLossesThisTick = new Map();
     this.newForeignContactsThisTick = new Map();
+    this.raids = new Map();
 
     for (const colony of this.colonies) {
       const colonyConfig = this.colonyConfigs.get(colony.id);
@@ -291,6 +295,7 @@ export class Simulation {
     for (const colony of colonyOrder) {
       const colonyConfig = this.colonyConfigs.get(colony.id);
       const field = this.colonyPheromones.get(colony.id);
+      this.detectEnemyNests(colony, colonyConfig);
       for (const ant of colony.ants) {
       if (ant.state === AntState.DEAD) continue;
       if (this.config.combatEnabled && ant.combatCooldown > 0) ant.combatCooldown -= 1;
@@ -344,6 +349,8 @@ export class Simulation {
           detectionRadius,
         );
         targetDistance = this.returnHome.update(ant, navigation, localHome, deltaSeconds);
+      } else if (ant.state === AntState.RAIDING) {
+        targetDistance = this.raidTravelDistance(ant, colony);
       } else {
         const food = ant.caste === Caste.SOLDIER ? null : this.foodDetection.findNearest(
           ant,
@@ -427,15 +434,19 @@ export class Simulation {
           ant.returnDistance = 0;
           ant.directReturnDistance = 0;
         }
-        if (this.homeDetection.isInside(ant, colony.nest)
-          && this.metabolism.needsFood(ant)) {
-          this.metabolism.feedAtNest(
-            ant,
-            colony,
-            colonyConfig.foodEnergyValue,
-            colonyConfig.resumeEnergyThreshold,
-          );
+        if (this.homeDetection.isInside(ant, colony.nest)) {
+          if (ant.raidId) this.resolveRaidMemberOutcome(ant, colony, "RETURNED");
+          if (this.metabolism.needsFood(ant)) {
+            this.metabolism.feedAtNest(
+              ant,
+              colony,
+              colonyConfig.foodEnergyValue,
+              colonyConfig.resumeEnergyThreshold,
+            );
+          }
         }
+      } else if (ant.state === AntState.RAIDING) {
+        this.updateRaidTravel(ant, colony);
       } else {
         if (this.homeDetection.isInside(ant, colony.nest)) ant.distanceSinceNest = 0;
         if (colonyConfig.pheromonesEnabled) this.depositTrail(ant);
@@ -457,6 +468,9 @@ export class Simulation {
           }
           if (colonyConfig.pheromonesEnabled) this.depositTrail(ant);
         }
+      }
+      if (ant.pendingNestIntel && this.homeDetection.isInside(ant, colony.nest)) {
+        this.deliverNestIntel(ant, colony);
       }
     }
       const eggsBeforeUpdate = colony.queen.eggsLaid;
@@ -565,6 +579,136 @@ export class Simulation {
     ant.directReturnDistance = 0;
     ant.target = null;
     ant.returnReason = null;
+    if (ant.raidId) this.resolveRaidMemberOutcome(ant, colony, "DEAD");
+  }
+
+  detectEnemyNests(colony, colonyConfig) {
+    if (this.colonies.length < 2) return;
+    const radius = colonyConfig.nestDiscoveryRadius;
+    const radiusSquared = radius * radius;
+    for (const ant of colony.ants) {
+      if (ant.state === AntState.DEAD) continue;
+      for (const other of this.colonies) {
+        if (other.id === colony.id) continue;
+        const dx = other.nest.position.x - ant.position.x;
+        const dy = other.nest.position.y - ant.position.y;
+        if (dx * dx + dy * dy > radiusSquared) continue;
+        ant.pendingNestIntel = {
+          colonyId: other.id,
+          position: { ...other.nest.position },
+          tick: this.tickCount,
+        };
+      }
+    }
+  }
+
+  deliverNestIntel(ant, colony) {
+    const intel = ant.pendingNestIntel;
+    ant.pendingNestIntel = null;
+    const existing = colony.knownEnemyNests.get(intel.colonyId);
+    colony.knownEnemyNests.set(intel.colonyId, {
+      position: intel.position,
+      discoveredTick: existing ? existing.discoveredTick : intel.tick,
+      lastSeenTick: intel.tick,
+    });
+    if (!existing) {
+      colony.enemyNestsDiscovered += 1;
+      this.emitEvent("ENEMY_NEST_DISCOVERED", {
+        colonyId: colony.id,
+        antId: ant.id,
+        targetColonyId: intel.colonyId,
+        position: intel.position,
+      });
+    }
+  }
+
+  raidTravelDistance(ant, colony) {
+    const raid = this.raids.get(ant.raidId);
+    const intel = raid ? colony.knownEnemyNests.get(raid.targetColonyId) : null;
+    const targetPosition = intel ? intel.position : colony.nest.position;
+    const dx = targetPosition.x - ant.position.x;
+    const dy = targetPosition.y - ant.position.y;
+    ant.direction = Math.atan2(dy, dx);
+    return Math.hypot(dx, dy);
+  }
+
+  updateRaidTravel(ant, colony) {
+    const raid = this.raids.get(ant.raidId);
+    if (!raid) {
+      ant.raidId = null;
+      ant.state = AntState.SEARCHING_FOOD;
+      return;
+    }
+    const intel = colony.knownEnemyNests.get(raid.targetColonyId);
+    const targetPosition = intel ? intel.position : colony.nest.position;
+    const distance = Math.hypot(
+      targetPosition.x - ant.position.x,
+      targetPosition.y - ant.position.y,
+    );
+    if (distance <= this.config.raidArrivalRadius) {
+      if (raid.state === RaidState.TRAVELLING) {
+        raid.state = RaidState.RETURNING;
+        this.emitEvent("RAID_REACHED_TARGET", {
+          raidId: raid.id,
+          colonyId: colony.id,
+          targetColonyId: raid.targetColonyId,
+        });
+      }
+      ant.state = AntState.RETURNING_HOME;
+      ant.direction += Math.PI;
+    }
+  }
+
+  resolveRaidMemberOutcome(ant, colony, outcome) {
+    const raid = this.raids.get(ant.raidId);
+    ant.raidId = null;
+    if (!raid) return;
+    if (outcome === "DEAD") {
+      raid.deadIds.add(ant.id);
+      colony.raidersLost += 1;
+    } else {
+      raid.returnedIds.add(ant.id);
+      ant.state = AntState.SEARCHING_FOOD;
+      ant.returnReason = null;
+    }
+    const accountedFor = raid.returnedIds.size + raid.deadIds.size;
+    if (accountedFor < raid.memberIds.size) return;
+    raid.state = raid.returnedIds.size > 0 ? RaidState.COMPLETE : RaidState.FAILED;
+    if (raid.state === RaidState.COMPLETE) colony.raidsCompleted += 1;
+    else colony.raidsFailed += 1;
+    this.emitEvent("RAID_RETURNED", {
+      raidId: raid.id,
+      colonyId: colony.id,
+      targetColonyId: raid.targetColonyId,
+      outcome: raid.state,
+      survivors: raid.returnedIds.size,
+      losses: raid.deadIds.size,
+    });
+    this.raids.delete(raid.id);
+  }
+
+  requestRaid(sourceColonyId, targetColonyId, groupSize) {
+    const colony = this.colonies.find((candidate) => candidate.id === sourceColonyId);
+    if (!colony) return null;
+    const colonyConfig = this.colonyConfigs.get(sourceColonyId);
+    const raid = this.raidSystem.createRaid(
+      colony,
+      targetColonyId,
+      groupSize ?? colonyConfig.raidGroupSize,
+      this.tickCount,
+    );
+    if (!raid) return null;
+    this.raids.set(raid.id, raid);
+    colony.raidsStarted += 1;
+    colony.raidersSent += raid.memberIds.size;
+    this.emitEvent("RAID_CREATED", {
+      raidId: raid.id,
+      colonyId: colony.id,
+      targetColonyId,
+      memberCount: raid.memberIds.size,
+    });
+    this.emitEvent("RAID_DEPARTED", { raidId: raid.id, colonyId: colony.id, targetColonyId });
+    return raid;
   }
 
   emitEvent(type, details = {}) {
@@ -1083,6 +1227,14 @@ export class Simulation {
       threats: colony.threats,
       damageDealt: colony.damageDealt,
       territoryCells: this.territoryMap.getStats().controlled[colony.id] ?? 0,
+      enemyNestsDiscovered: colony.enemyNestsDiscovered,
+      knownEnemyNests: colony.knownEnemyNests.size,
+      raidsStarted: colony.raidsStarted,
+      raidsCompleted: colony.raidsCompleted,
+      raidsFailed: colony.raidsFailed,
+      raidersSent: colony.raidersSent,
+      raidersLost: colony.raidersLost,
+      activeRaiders: colony.ants.filter((ant) => ant.raidId !== null).length,
       foodPheromones,
       homePheromones,
       alarmPheromones,

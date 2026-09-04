@@ -125,6 +125,9 @@ export const DEFAULT_CONFIG = Object.freeze({
   threatPressureDeathWeight: 8,
   threatPressureAlarmWeight: 0.05,
   threatPressureRatioScale: 200,
+  nestDiscoveryRadius: 40,
+  raidGroupSize: 5,
+  raidArrivalRadius: 20,
   nest: { x: 135, y: 365, radius: 28 },
   foodSources: [
     { x: 625, y: 125, quantity: 100, radius: 20 },

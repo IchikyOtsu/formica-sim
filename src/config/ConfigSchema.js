@@ -50,6 +50,9 @@ export const CONFIG_SECTIONS = Object.freeze({
     "threatPressureDecay", "threatPressureContactWeight", "threatPressureDeathWeight",
     "threatPressureAlarmWeight", "threatPressureRatioScale",
   ]),
+  raids: Object.freeze([
+    "nestDiscoveryRadius", "raidGroupSize", "raidArrivalRadius",
+  ]),
   demography: Object.freeze([
     "initialFoodStock", "reproductionEnabled", "queenLayingCooldownTicks",
     "reproductionFoodThreshold", "eggFoodCost", "maxBrood", "maxWorkers",
@@ -117,6 +120,7 @@ export function validateFlatConfig(config) {
     "width", "height", "tickDurationMs", "antMaxEnergy", "territoryUpdateInterval",
     "pheromoneCellSize", "pheromoneMaxIntensity", "seasonDurationTicks", "territoryFalloffDistance",
     "combatRadius", "combatMaxHealth", "soldierMaxHealth",
+    "nestDiscoveryRadius", "raidArrivalRadius",
   ]) {
     if (config[key] <= 0) fail(key, "doit être positif");
   }
@@ -153,6 +157,9 @@ export function validateFlatConfig(config) {
   }
   if (!Number.isInteger(config.combatAttackCooldownTicks) || config.combatAttackCooldownTicks < 0) {
     fail("combatAttackCooldownTicks", "entier positif ou nul attendu");
+  }
+  if (!Number.isInteger(config.raidGroupSize) || config.raidGroupSize <= 0) {
+    fail("raidGroupSize", "entier positif attendu");
   }
   if (!Number.isInteger(config.seed)) fail("seed", "entier attendu");
   if (!Number.isInteger(config.territoryUpdateInterval)) {

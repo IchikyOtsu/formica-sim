@@ -31,6 +31,13 @@ export class Colony {
     this.soldierBirths = 0;
     this.threatPressure = 0;
     this.maxPopulation = 1;
+    this.knownEnemyNests = new Map();
+    this.enemyNestsDiscovered = 0;
+    this.raidsStarted = 0;
+    this.raidsCompleted = 0;
+    this.raidsFailed = 0;
+    this.raidersSent = 0;
+    this.raidersLost = 0;
   }
 
   depositFood(amount) {

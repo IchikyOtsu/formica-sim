@@ -4,6 +4,7 @@ export const AntState = Object.freeze({
   SEARCHING_FOOD: "SEARCHING_FOOD",
   RETURNING_HOME: "RETURNING_HOME",
   RESTING: "RESTING",
+  RAIDING: "RAIDING",
   DEAD: "DEAD",
 });
 
@@ -61,5 +62,7 @@ export class Ant {
     this.directReturnDistance = 0;
     this.nearbyForeignAnts = [];
     this.lastDiscoveredSourceId = null;
+    this.pendingNestIntel = null;
+    this.raidId = null;
   }
 }
