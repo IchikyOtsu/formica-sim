@@ -36,7 +36,17 @@ export const SCENARIO_CATEGORIES = Object.freeze([
   { id: "alarm", label: "Phéromones ALARM" },
   { id: "combat", label: "Combat (V1.2)" },
   { id: "castes", label: "Castes & soldats (V1.3)" },
+  { id: "complete", label: "Version complète (V1.4)" },
 ]);
+
+function completeCastes() {
+  return {
+    castesEnabled: true,
+    casteSoldierRatioCap: 0.35,
+    threatPressureRatioScale: 150,
+    casteStockThreshold: 30,
+  };
+}
 
 export const SCENARIO_PRESETS = Object.freeze([
   {
@@ -259,6 +269,37 @@ export const SCENARIO_PRESETS = Object.freeze([
           threatPressureRatioScale: 150,
           casteStockThreshold: 30,
         },
+      ],
+      foodSources: [
+        { id: "CENTER", x: 400, y: 260, quantity: 140, radius: 22 },
+        { id: "WEST", x: 265, y: 120, quantity: 60, radius: 16 },
+        { id: "EAST", x: 535, y: 400, quantity: 60, radius: 16 },
+      ],
+    },
+  },
+  {
+    id: "complete-v1.4",
+    name: "Version complète V1.4",
+    description: "Toutes les couches actives : territoire, ALARM, combat, castes adaptatives, découverte de nid, raids automatiques, pillage et défense de nid. Ambre (défensive) contre Azur (agressive), mêmes règles de castes et de raids des deux côtés — la découverte et les raids restent entièrement organiques (pas de nid connu d'avance).",
+    category: "complete",
+    seed: 1847,
+    duration: 30_000,
+    config: {
+      directHomeNavigation: true,
+      queenLayingCooldownTicks: 300,
+      maxBrood: 20,
+      nestDiscoveryRadius: 80,
+      pillageEnabled: true,
+      raidCarryCapacity: 20,
+      autoRaidEnabled: true,
+      raidEvaluationIntervalTicks: 200,
+      minRaidSize: 3,
+      maxRaidSize: 6,
+      minStockToRaid: 60,
+      raidCooldownTicks: 1500,
+      colonies: [
+        { ...colonies()[0], ...combatProfileOverrides("defensive"), ...completeCastes() },
+        { ...colonies()[1], ...combatProfileOverrides("aggressive"), ...completeCastes() },
       ],
       foodSources: [
         { id: "CENTER", x: 400, y: 260, quantity: 140, radius: 22 },

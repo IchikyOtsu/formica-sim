@@ -10,6 +10,7 @@ import { SearchFoodBehavior } from "../src/behaviors/SearchFoodBehavior.js";
 import { ReturnHomeBehavior } from "../src/behaviors/ReturnHomeBehavior.js";
 import { Ant, AntState, Caste } from "../src/entities/Ant.js";
 import { RaidState } from "../src/entities/Raid.js";
+import { RaidDecisionSystem } from "../src/systems/RaidDecisionSystem.js";
 import { Brood, BroodStage } from "../src/entities/Brood.js";
 import { FoodSource, FoodSourceState } from "../src/entities/FoodSource.js";
 import { DangerZone } from "../src/environment/DangerZone.js";
@@ -1922,6 +1923,7 @@ function pushSoldier(colony, id, overrides = {}) {
     maxHealth: 100,
     attackPower: 10,
     caste: Caste.SOLDIER,
+    raidCarryCapacity: 20,
     ...overrides,
   });
   colony.ants.push(soldier);
@@ -2239,4 +2241,405 @@ test("nest defense runs without soldiers when castesEnabled is false, but never 
   assert.equal(colonyA.nestUnderThreat, true, "detection and ALARM do not depend on castes");
   assert.equal(colonyA.defendersMobilized, 0, "no SOLDIER caste exists to mobilize");
   assertSimulationInvariants(simulation);
+});
+
+function pillageConfig({ bFoodStock, aFoodStock, ...overrides } = {}) {
+  const config = multiColonyConfig({
+    antSpeed: 40,
+    combatEnabled: false,
+    directHomeNavigation: true,
+    nestDiscoveryRadius: 40,
+    raidArrivalRadius: 15,
+    raidGroupSize: 5,
+    raidCarryCapacity: 20,
+    ...overrides,
+  });
+  config.colonies = config.colonies.map((colony) => {
+    if (colony.id === "B" && bFoodStock !== undefined) return { ...colony, initialFoodStock: bFoodStock };
+    if (colony.id === "A" && aFoodStock !== undefined) return { ...colony, initialFoodStock: aFoodStock };
+    return colony;
+  });
+  return config;
+}
+
+function setupRaid(simulation, groupSize = 1) {
+  const colonyA = simulation.colonies[0];
+  const colonyB = simulation.colonies[1];
+  // freeze both colonies' own foragers so their incidental movement/collection
+  // of the shared food source never confounds the pillage-specific assertions.
+  colonyA.ants[0].speed = 0;
+  colonyB.ants[0].speed = 0;
+  colonyA.knownEnemyNests.set("B", {
+    position: { ...colonyB.nest.position },
+    discoveredTick: 0,
+    lastSeenTick: 0,
+  });
+  return simulation.requestRaid("A", "B", groupSize);
+}
+
+test("a raider steals nothing when the enemy stock is empty", () => {
+  const simulation = new Simulation(pillageConfig());
+  const colonyA = simulation.colonies[0];
+  const colonyB = simulation.colonies[1];
+  const soldier = pushSoldier(colonyA, "A-SOLDIER-1");
+  setupRaid(simulation);
+
+  let sawStolenEvent = false;
+  for (let tick = 0; tick < 200 && soldier.raidId !== null; tick += 1) {
+    simulation.tick();
+    if (simulation.tickEvents.some((event) => event.type === "FOOD_STOLEN")) sawStolenEvent = true;
+  }
+
+  assert.equal(sawStolenEvent, false);
+  assert.equal(soldier.raidCargo, 0);
+  assert.equal(colonyA.foodStolen, 0);
+  assert.equal(colonyB.foodStock, 0);
+});
+
+test("a raider never steals more than its raidCarryCapacity even against a much larger stock", () => {
+  const simulation = new Simulation(pillageConfig({ bFoodStock: 500 }));
+  const colonyA = simulation.colonies[0];
+  const colonyB = simulation.colonies[1];
+  const soldier = pushSoldier(colonyA, "A-SOLDIER-1", { raidCarryCapacity: 10 });
+  setupRaid(simulation);
+
+  let stolenEvent = null;
+  for (let tick = 0; tick < 200 && !stolenEvent; tick += 1) {
+    simulation.tick();
+    stolenEvent = simulation.tickEvents.find((event) => event.type === "FOOD_STOLEN");
+  }
+
+  assert.ok(stolenEvent, "the raider should have reached the nest and looted once");
+  assert.equal(stolenEvent.amount, 10, "capped at raidCarryCapacity, not the full stock");
+  assert.equal(soldier.raidCargo, 10);
+  assert.equal(colonyB.foodStock, 490, "the enemy stock drops by exactly the stolen amount");
+});
+
+test("simultaneous raiders share a limited enemy stock atomically, never exceeding it", () => {
+  const simulation = new Simulation(pillageConfig({ bFoodStock: 30 }));
+  const colonyA = simulation.colonies[0];
+  const colonyB = simulation.colonies[1];
+  const first = pushSoldier(colonyA, "A-SOLDIER-1");
+  const second = pushSoldier(colonyA, "A-SOLDIER-2");
+  setupRaid(simulation, 2);
+
+  for (let tick = 0; tick < 200 && (first.raidId !== null || second.raidId !== null); tick += 1) {
+    simulation.tick();
+    if (first.state !== AntState.RAIDING && second.state !== AntState.RAIDING) break;
+  }
+
+  assert.equal(colonyB.foodStock, 0, "the shared stock is fully and exactly drained, never negative");
+  assert.equal(
+    first.raidCargo + second.raidCargo,
+    30,
+    "the 30 available units are split atomically between the two raiders, never double-counted",
+  );
+});
+
+test("the raiding colony's stock only grows once the raider actually gets home with the loot", () => {
+  const simulation = new Simulation(pillageConfig({ bFoodStock: 50 }));
+  const colonyA = simulation.colonies[0];
+  const soldier = pushSoldier(colonyA, "A-SOLDIER-1");
+  setupRaid(simulation);
+  const stockBeforeRaid = colonyA.foodStock;
+
+  let checkedWhileCarrying = false;
+  for (let tick = 0; tick < 600 && soldier.raidId !== null; tick += 1) {
+    simulation.tick();
+    if (soldier.raidCargo > 0 && !checkedWhileCarrying) {
+      checkedWhileCarrying = true;
+      assert.equal(
+        colonyA.foodStock,
+        stockBeforeRaid,
+        "the home stock must not move the instant loot is taken — only on actual arrival",
+      );
+    }
+  }
+
+  assert.equal(checkedWhileCarrying, true, "the raider should have looted at some point in this run");
+  assert.equal(colonyA.foodStock, stockBeforeRaid + 20, "own stock increases exactly once, on arrival");
+  assert.equal(colonyA.raidersReturnedWithLoot, 1);
+  assert.equal(colonyA.foodRecovered, 20);
+  assert.equal(soldier.raidCargo, 0);
+});
+
+test("a raider killed while carrying loot drops it on the ground as a recoverable resource", () => {
+  const simulation = new Simulation(pillageConfig({ bFoodStock: 40 }));
+  const colonyA = simulation.colonies[0];
+  const soldier = pushSoldier(colonyA, "A-SOLDIER-1", { raidCarryCapacity: 12 });
+  const raid = setupRaid(simulation);
+  simulation.attemptPillage(soldier, colonyA, raid);
+  assert.equal(soldier.raidCargo, 12, "the loot must come from a real theft, to keep conservation exact");
+  soldier.position = { x: 77, y: 33 };
+  const initialSourceCount = simulation.foodSources.length;
+
+  soldier.state = AntState.DEAD;
+  simulation.handleDeath(soldier, "STARVATION", colonyA);
+
+  assert.equal(soldier.raidCargo, 0);
+  assert.equal(simulation.foodSources.length, initialSourceCount + 1);
+  const drop = simulation.foodSources[simulation.foodSources.length - 1];
+  assert.equal(drop.quantity, 12);
+  assert.deepEqual(drop.position, soldier.position);
+  assert.equal(drop.active, true, "the dropped loot is an ordinary, collectible food source");
+  assert.equal(colonyA.foodDropped, 12);
+  assert.equal(colonyA.raidersKilledWithLoot, 1);
+  assertSimulationInvariants(simulation);
+});
+
+test("a raider never steals twice on the same outing", () => {
+  const simulation = new Simulation(pillageConfig({ bFoodStock: 100 }));
+  const colonyA = simulation.colonies[0];
+  const colonyB = simulation.colonies[1];
+  const soldier = pushSoldier(colonyA, "A-SOLDIER-1");
+  const raid = setupRaid(simulation);
+
+  simulation.attemptPillage(soldier, colonyA, raid);
+  const stockAfterFirst = colonyB.foodStock;
+  const cargoAfterFirst = soldier.raidCargo;
+  assert.ok(cargoAfterFirst > 0);
+
+  simulation.attemptPillage(soldier, colonyA, raid);
+  assert.equal(colonyB.foodStock, stockAfterFirst, "a second attempt on the same outing takes nothing more");
+  assert.equal(soldier.raidCargo, cargoAfterFirst);
+});
+
+test("nest defense combined with combat and pillage keeps food conservation exact", () => {
+  const simulation = new Simulation(pillageConfig({ combatEnabled: true, castesEnabled: true, bFoodStock: 80 }));
+  const colonyA = simulation.colonies[0];
+  const colonyB = simulation.colonies[1];
+  pushSoldier(colonyA, "A-SOLDIER-1");
+  pushSoldier(colonyA, "A-SOLDIER-2");
+  pushSoldier(colonyB, "B-SOLDIER-1");
+  setupRaid(simulation, 2);
+
+  for (let tick = 0; tick < 2000; tick += 1) {
+    simulation.tick();
+    assertSimulationInvariants(simulation);
+  }
+});
+
+test("nest defense replay with pillage is exact for an identical seed and configuration", () => {
+  const config = pillageConfig({ combatEnabled: true });
+  const runOnce = () => {
+    const simulation = new Simulation(config);
+    pushSoldier(simulation.colonies[0], "A-SOLDIER-1");
+    setupRaid(simulation);
+    for (let tick = 0; tick < 400; tick += 1) simulation.tick();
+    return simulation;
+  };
+  const first = runOnce();
+  const second = runOnce();
+  const snapshot = (simulation) => simulation.colonies.map((colony) => ({
+    foodStock: colony.foodStock,
+    foodStolen: colony.foodStolen,
+    foodRecovered: colony.foodRecovered,
+    foodDropped: colony.foodDropped,
+    raidersReturnedWithLoot: colony.raidersReturnedWithLoot,
+    raidersKilledWithLoot: colony.raidersKilledWithLoot,
+  }));
+  assert.deepEqual(snapshot(first), snapshot(second));
+});
+
+test("pillageEnabled = false reproduces V1.4.3 behavior: raids travel and return with empty hands", () => {
+  const simulation = new Simulation(pillageConfig({ pillageEnabled: false, bFoodStock: 80 }));
+  const colonyA = simulation.colonies[0];
+  const colonyB = simulation.colonies[1];
+  const soldier = pushSoldier(colonyA, "A-SOLDIER-1");
+  setupRaid(simulation);
+
+  let sawStolenEvent = false;
+  for (let tick = 0; tick < 400 && soldier.raidId !== null; tick += 1) {
+    simulation.tick();
+    if (simulation.tickEvents.some((event) => event.type === "FOOD_STOLEN")) sawStolenEvent = true;
+  }
+
+  assert.equal(sawStolenEvent, false);
+  assert.equal(colonyB.foodStock, 80, "untouched — pillage never engages");
+  assert.equal(colonyA.foodStolen, 0);
+  assert.equal(colonyA.foodRecovered, 0);
+  assert.equal(colonyA.raidsCompleted, 1, "the raid itself still runs its full course");
+});
+
+function raidDecisionConfig(overrides = {}) {
+  return {
+    autoRaidEnabled: true,
+    raidEvaluationIntervalTicks: 10,
+    minRaidSize: 3,
+    maxRaidSize: 6,
+    minStockToRaid: 50,
+    raidCooldownTicks: 200,
+    ...overrides,
+  };
+}
+
+function colonyWithSoldiers(count) {
+  const colony = new Colony({ id: "A", nest: new Nest(0, 0, 5) });
+  colony.foodStock = 100;
+  for (let index = 0; index < count; index += 1) {
+    pushSoldier(colony, `A-SOLDIER-${index}`);
+  }
+  colony.knownEnemyNests.set("B", { position: { x: 500, y: 0 }, discoveredTick: 10, lastSeenTick: 10 });
+  return colony;
+}
+
+test("RaidDecisionSystem never triggers when autoRaidEnabled is false", () => {
+  const system = new RaidDecisionSystem();
+  const colony = colonyWithSoldiers(5);
+  const decision = system.decide(colony, raidDecisionConfig({ autoRaidEnabled: false }), 100, new Set());
+  assert.equal(decision, null);
+});
+
+test("RaidDecisionSystem only evaluates on the configured interval", () => {
+  const system = new RaidDecisionSystem();
+  const colony = colonyWithSoldiers(5);
+  const config = raidDecisionConfig();
+  assert.equal(system.decide(colony, config, 101, new Set()), null, "not a multiple of the interval");
+  assert.ok(system.decide(colony, config, 100, new Set()));
+});
+
+test("RaidDecisionSystem refuses to raid below minStockToRaid", () => {
+  const system = new RaidDecisionSystem();
+  const colony = colonyWithSoldiers(5);
+  colony.foodStock = 10;
+  const decision = system.decide(colony, raidDecisionConfig({ minStockToRaid: 50 }), 100, new Set());
+  assert.equal(decision, null);
+});
+
+test("RaidDecisionSystem refuses to raid without a known enemy nest", () => {
+  const system = new RaidDecisionSystem();
+  const colony = new Colony({ id: "A", nest: new Nest(0, 0, 5) });
+  colony.foodStock = 200;
+  for (let index = 0; index < 5; index += 1) pushSoldier(colony, `A-SOLDIER-${index}`);
+  const decision = system.decide(colony, raidDecisionConfig(), 100, new Set());
+  assert.equal(decision, null, "nothing to target");
+});
+
+test("RaidDecisionSystem refuses to raid below minRaidSize available soldiers", () => {
+  const system = new RaidDecisionSystem();
+  const colony = colonyWithSoldiers(2);
+  const decision = system.decide(colony, raidDecisionConfig({ minRaidSize: 3 }), 100, new Set());
+  assert.equal(decision, null);
+});
+
+test("RaidDecisionSystem caps the group size at maxRaidSize even with more soldiers available", () => {
+  const system = new RaidDecisionSystem();
+  const colony = colonyWithSoldiers(10);
+  const decision = system.decide(colony, raidDecisionConfig({ maxRaidSize: 4 }), 100, new Set());
+  assert.equal(decision.groupSize, 4);
+});
+
+test("RaidDecisionSystem never targets a colony already under an active raid from this colony", () => {
+  const system = new RaidDecisionSystem();
+  const colony = colonyWithSoldiers(5);
+  const decision = system.decide(colony, raidDecisionConfig(), 100, new Set(["B"]));
+  assert.equal(decision, null, "B is already being raided — no duplicate raid toward the same target");
+});
+
+test("RaidDecisionSystem excludes soldiers that are DEFENDING, RAIDING, or dead from availability", () => {
+  const system = new RaidDecisionSystem();
+  const colony = colonyWithSoldiers(5);
+  colony.ants[0].state = AntState.DEFENDING;
+  colony.ants[1].state = AntState.DEAD;
+  colony.ants[2].raidId = "some-other-raid";
+  const decision = system.decide(colony, raidDecisionConfig({ minRaidSize: 2 }), 100, new Set());
+  assert.ok(decision);
+  assert.equal(decision.groupSize, 2, "only the two untouched SEARCHING_FOOD soldiers are available");
+});
+
+function autoRaidConfig(overrides = {}) {
+  return pillageConfig({
+    combatEnabled: true,
+    autoRaidEnabled: true,
+    raidEvaluationIntervalTicks: 10,
+    minRaidSize: 1,
+    maxRaidSize: 2,
+    minStockToRaid: 5,
+    raidCooldownTicks: 100,
+    ...overrides,
+  });
+}
+
+test("an eligible colony launches raids on its own once autoRaidEnabled is set, with no manual requestRaid call", () => {
+  const simulation = new Simulation(autoRaidConfig({ bFoodStock: 200, aFoodStock: 100 }));
+  const colonyA = simulation.colonies[0];
+  pushSoldier(colonyA, "A-SOLDIER-1");
+  pushSoldier(colonyA, "A-SOLDIER-2");
+  colonyA.knownEnemyNests.set("B", {
+    position: { ...simulation.colonies[1].nest.position },
+    discoveredTick: 0,
+    lastSeenTick: 0,
+  });
+  simulation.colonies[1].ants[0].speed = 0;
+
+  let sawRaidCreated = false;
+  for (let tick = 0; tick < 500 && !sawRaidCreated; tick += 1) {
+    simulation.tick();
+    if (simulation.tickEvents.some((event) => event.type === "RAID_CREATED")) sawRaidCreated = true;
+  }
+
+  assert.equal(sawRaidCreated, true, "the colony should launch a raid entirely on its own");
+  assert.equal(colonyA.raidsStarted, 1);
+});
+
+test("the raid cooldown prevents launching a second raid immediately after the first", () => {
+  const simulation = new Simulation(autoRaidConfig({ bFoodStock: 500, aFoodStock: 100, raidCooldownTicks: 100_000 }));
+  const colonyA = simulation.colonies[0];
+  for (let index = 0; index < 4; index += 1) pushSoldier(colonyA, `A-SOLDIER-${index}`);
+  colonyA.knownEnemyNests.set("B", {
+    position: { ...simulation.colonies[1].nest.position },
+    discoveredTick: 0,
+    lastSeenTick: 0,
+  });
+  simulation.colonies[1].ants[0].speed = 0;
+
+  let raidsStartedEvents = 0;
+  for (let tick = 0; tick < 1000; tick += 1) {
+    simulation.tick();
+    raidsStartedEvents += simulation.tickEvents.filter((event) => event.type === "RAID_CREATED").length;
+  }
+
+  assert.equal(raidsStartedEvents, 1, "the cooldown blocks any further raid for the rest of the run");
+});
+
+test("autoRaidEnabled = false reproduces V1.4.4 behavior exactly: raids never trigger on their own", () => {
+  const simulation = new Simulation(pillageConfig({ combatEnabled: true, bFoodStock: 500 }));
+  const colonyA = simulation.colonies[0];
+  for (let index = 0; index < 4; index += 1) pushSoldier(colonyA, `A-SOLDIER-${index}`);
+  colonyA.knownEnemyNests.set("B", {
+    position: { ...simulation.colonies[1].nest.position },
+    discoveredTick: 0,
+    lastSeenTick: 0,
+  });
+
+  for (let tick = 0; tick < 500; tick += 1) simulation.tick();
+
+  assert.equal(colonyA.raidsStarted, 0);
+  assert.equal(simulation.raids.size, 0);
+});
+
+test("auto-raid replay is exact for an identical seed and configuration", () => {
+  const config = autoRaidConfig({ bFoodStock: 300, aFoodStock: 100 });
+  const runOnce = () => {
+    const simulation = new Simulation(config);
+    const colonyA = simulation.colonies[0];
+    for (let index = 0; index < 4; index += 1) pushSoldier(colonyA, `A-SOLDIER-${index}`);
+    colonyA.knownEnemyNests.set("B", {
+      position: { ...simulation.colonies[1].nest.position },
+      discoveredTick: 0,
+      lastSeenTick: 0,
+    });
+    simulation.colonies[1].ants[0].speed = 0;
+    const raidTicks = [];
+    for (let tick = 0; tick < 1500; tick += 1) {
+      simulation.tick();
+      if (simulation.tickEvents.some((event) => event.type === "RAID_CREATED")) raidTicks.push(tick);
+    }
+    return { raidTicks, colonyA };
+  };
+  const first = runOnce();
+  const second = runOnce();
+  assert.deepEqual(first.raidTicks, second.raidTicks);
+  assert.equal(first.colonyA.foodStolen, second.colonyA.foodStolen);
+  assert.equal(first.colonyA.raidsCompleted, second.colonyA.raidsCompleted);
 });

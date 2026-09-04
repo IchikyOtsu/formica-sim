@@ -16,8 +16,15 @@ export function inspectSimulationInvariants(simulation) {
       add("worker-health-bounds", `${ant.id}: ${ant.health}`);
     }
     if (!simulation.world.contains(ant.position)) add("worker-inside-world", ant.id);
-    if (ant.state === AntState.DEAD && (ant.carryingFood || ant.target !== null || ant.raidId !== null)) {
+    if (ant.state === AntState.DEAD
+      && (ant.carryingFood || ant.target !== null || ant.raidId !== null || ant.raidCargo !== 0)) {
       add("dead-worker-inert", ant.id);
+    }
+    if (ant.raidCargo < -EPSILON || ant.raidCargo > ant.raidCarryCapacity + EPSILON) {
+      add("raid-cargo-bounds", `${ant.id}: ${ant.raidCargo} / ${ant.raidCarryCapacity}`);
+    }
+    if (ant.raidCargo > EPSILON && ant.raidId === null && ant.state !== AntState.DEAD) {
+      add("raid-cargo-without-raid", ant.id);
     }
     if (ant.state !== AntState.DEAD && ant.health <= 0) {
       add("living-worker-positive-health", `${ant.id}: ${ant.health}`);
@@ -72,7 +79,7 @@ export function inspectSimulationInvariants(simulation) {
     sum + colony.foodStock + colony.consumedFood
   ), 0)
     + simulation.foodSources.reduce((sum, source) => sum + source.quantity, 0)
-    + ants.reduce((sum, ant) => sum + ant.carryingFoodAmount, 0)
+    + ants.reduce((sum, ant) => sum + ant.carryingFoodAmount + ant.raidCargo, 0)
     + simulation.lostFood
     + simulation.expiredFood
     + simulation.removedColonyFood;

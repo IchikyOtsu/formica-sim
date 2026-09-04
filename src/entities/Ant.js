@@ -35,6 +35,7 @@ export class Ant {
     attackPower = 0,
     combatCooldown = 0,
     caste = Caste.WORKER,
+    raidCarryCapacity = 0,
   }) {
     this.id = id;
     this.position = { ...position };
@@ -65,5 +66,7 @@ export class Ant {
     this.lastDiscoveredSourceId = null;
     this.pendingNestIntel = null;
     this.raidId = null;
+    this.raidCarryCapacity = raidCarryCapacity;
+    this.raidCargo = 0;
   }
 }

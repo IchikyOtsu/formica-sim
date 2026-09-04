@@ -52,6 +52,9 @@ export const CONFIG_SECTIONS = Object.freeze({
   ]),
   raids: Object.freeze([
     "nestDiscoveryRadius", "raidGroupSize", "raidArrivalRadius",
+    "pillageEnabled", "raidCarryCapacity", "autoRaidEnabled",
+    "raidEvaluationIntervalTicks", "minRaidSize", "maxRaidSize",
+    "minStockToRaid", "raidCooldownTicks",
   ]),
   defense: Object.freeze([
     "nestDefenseEnabled", "nestDefenseRadius", "nestDefenseAlarmStrength",
@@ -142,6 +145,7 @@ export function validateFlatConfig(config) {
     "soldierAlarmRallyWeight", "soldierTerritoryInterceptWeight", "casteStockThreshold",
     "threatPressureContactWeight", "threatPressureDeathWeight", "threatPressureAlarmWeight",
     "threatPressureRatioScale", "nestDefenseAlarmStrength", "threatPressureNestProximityWeight",
+    "raidCarryCapacity", "minStockToRaid",
   ]) {
     if (config[key] < 0) fail(key, "ne peut pas être négatif");
   }
@@ -167,6 +171,18 @@ export function validateFlatConfig(config) {
   }
   if (!Number.isInteger(config.nestDefenseGraceTicks) || config.nestDefenseGraceTicks < 0) {
     fail("nestDefenseGraceTicks", "entier positif ou nul attendu");
+  }
+  if (!Number.isInteger(config.raidEvaluationIntervalTicks) || config.raidEvaluationIntervalTicks <= 0) {
+    fail("raidEvaluationIntervalTicks", "entier positif attendu");
+  }
+  if (!Number.isInteger(config.minRaidSize) || config.minRaidSize <= 0) {
+    fail("minRaidSize", "entier positif attendu");
+  }
+  if (!Number.isInteger(config.maxRaidSize) || config.maxRaidSize < config.minRaidSize) {
+    fail("maxRaidSize", "entier supérieur ou égal à minRaidSize attendu");
+  }
+  if (!Number.isInteger(config.raidCooldownTicks) || config.raidCooldownTicks < 0) {
+    fail("raidCooldownTicks", "entier positif ou nul attendu");
   }
   if (!Number.isInteger(config.seed)) fail("seed", "entier attendu");
   if (!Number.isInteger(config.territoryUpdateInterval)) {

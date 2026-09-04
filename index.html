@@ -230,6 +230,14 @@
               <label>Plafond soldats<input id="param-caste-ratio-cap" type="number" min="0" max="1" step="0.01" value="0.3" /></label>
               <label>Seuil stock (castes)<input id="param-caste-stock-threshold" type="number" min="0" max="1000" step="1" value="40" /></label>
               <label>Échelle pression menace<input id="param-threat-pressure-scale" type="number" min="1" max="2000" step="1" value="200" /></label>
+              <label class="check-label">Pillage<input id="param-pillage-enabled" type="checkbox" checked /></label>
+              <label>Capacité de transport<input id="param-raid-carry-capacity" type="number" min="0" max="500" step="1" value="20" /></label>
+              <label class="check-label">Raids automatiques<input id="param-auto-raid-enabled" type="checkbox" /></label>
+              <p class="field-hint">Nécessite castes + combat actifs et un nid ennemi découvert (contact organique, jamais connu d'avance) avant qu'un raid puisse partir.</p>
+              <label>Taille min. raid<input id="param-min-raid-size" type="number" min="1" max="50" step="1" value="3" /></label>
+              <label>Taille max. raid<input id="param-max-raid-size" type="number" min="1" max="50" step="1" value="6" /></label>
+              <label>Stock min. pour raider<input id="param-min-stock-to-raid" type="number" min="0" max="2000" step="1" value="50" /></label>
+              <label>Cooldown raid<input id="param-raid-cooldown" type="number" min="0" max="100000" step="100" value="1500" /></label>
               <button type="submit">Appliquer + Reset</button>
             </form>
           </details>

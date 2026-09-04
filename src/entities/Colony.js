@@ -45,6 +45,13 @@ export class Colony {
     this.defendersMobilized = 0;
     this.defensiveKills = 0;
     this.workersEvacuated = 0;
+    this.foodStolen = 0;
+    this.foodRecovered = 0;
+    this.foodDropped = 0;
+    this.foodLostToRaids = 0;
+    this.raidersReturnedWithLoot = 0;
+    this.raidersKilledWithLoot = 0;
+    this.nextRaidEligibleTick = 0;
   }
 
   depositFood(amount) {
@@ -60,5 +67,12 @@ export class Colony {
     this.foodStock -= consumed;
     this.consumedFood += consumed;
     return consumed;
+  }
+
+  takeStock(amount) {
+    if (amount <= 0 || this.foodStock <= 0) return 0;
+    const taken = Math.min(amount, this.foodStock);
+    this.foodStock -= taken;
+    return taken;
   }
 }

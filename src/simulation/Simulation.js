@@ -27,6 +27,7 @@ import { ForeignAntDetectionSystem } from "../systems/ForeignAntDetectionSystem.
 import { EncounterReactionSystem, EncounterReaction } from "../systems/EncounterReactionSystem.js";
 import { RaidSystem } from "../systems/RaidSystem.js";
 import { RaidState } from "../entities/Raid.js";
+import { RaidDecisionSystem } from "../systems/RaidDecisionSystem.js";
 import { normalizeConfig, toVersionedConfig } from "../config/ConfigSchema.js";
 import { DEFAULT_CONFIG } from "./SimulationConfig.js";
 import { ColonyPheromoneFields } from "./ColonyPheromoneFields.js";
@@ -75,6 +76,7 @@ export class Simulation {
     this.foreignAntDetection = new ForeignAntDetectionSystem();
     this.encounterReaction = new EncounterReactionSystem();
     this.raidSystem = new RaidSystem();
+    this.raidDecisionSystem = new RaidDecisionSystem();
     this.reset();
   }
 
@@ -300,6 +302,7 @@ export class Simulation {
       const field = this.colonyPheromones.get(colony.id);
       this.detectEnemyNests(colony, colonyConfig);
       this.detectNestThreats(colony, colonyConfig);
+      this.evaluateAutoRaid(colony, colonyConfig);
       for (const ant of colony.ants) {
       if (ant.state === AntState.DEAD) continue;
       if (this.config.combatEnabled && ant.combatCooldown > 0) ant.combatCooldown -= 1;
@@ -446,6 +449,7 @@ export class Simulation {
           ant.directReturnDistance = 0;
         }
         if (this.homeDetection.isInside(ant, colony.nest)) {
+          if (ant.raidCargo > 0) this.depositLoot(ant, colony);
           if (ant.raidId) this.resolveRaidMemberOutcome(ant, colony, "RETURNED");
           if (this.metabolism.needsFood(ant)) {
             this.metabolism.feedAtNest(
@@ -600,6 +604,7 @@ export class Simulation {
     ant.directReturnDistance = 0;
     ant.target = null;
     ant.returnReason = null;
+    if (ant.raidCargo > 0) this.dropLoot(ant, colony);
     if (ant.raidId) this.resolveRaidMemberOutcome(ant, colony, "DEAD");
   }
 
@@ -703,6 +708,19 @@ export class Simulation {
     }
   }
 
+  evaluateAutoRaid(colony, colonyConfig) {
+    if (!colonyConfig.autoRaidEnabled) return;
+    const activeRaidTargets = new Set(
+      [...this.raids.values()]
+        .filter((raid) => raid.sourceColonyId === colony.id)
+        .map((raid) => raid.targetColonyId),
+    );
+    const decision = this.raidDecisionSystem.decide(colony, colonyConfig, this.tickCount, activeRaidTargets);
+    if (!decision) return;
+    const raid = this.requestRaid(colony.id, decision.targetColonyId, decision.groupSize);
+    if (raid) colony.nextRaidEligibleTick = this.tickCount + colonyConfig.raidCooldownTicks;
+  }
+
   deliverNestIntel(ant, colony) {
     const intel = ant.pendingNestIntel;
     ant.pendingNestIntel = null;
@@ -755,9 +773,60 @@ export class Simulation {
           targetColonyId: raid.targetColonyId,
         });
       }
+      this.attemptPillage(ant, colony, raid);
       ant.state = AntState.RETURNING_HOME;
       ant.direction += Math.PI;
     }
+  }
+
+  attemptPillage(ant, colony, raid) {
+    const colonyConfig = this.colonyConfigs.get(colony.id);
+    if (!colonyConfig.pillageEnabled || ant.raidCargo > 0) return;
+    const targetColony = this.colonies.find((candidate) => candidate.id === raid.targetColonyId);
+    if (!targetColony) return;
+    const stolen = targetColony.takeStock(ant.raidCarryCapacity);
+    if (stolen <= 0) return;
+    ant.raidCargo = stolen;
+    colony.foodStolen += stolen;
+    targetColony.foodLostToRaids += stolen;
+    this.emitEvent("FOOD_STOLEN", {
+      colonyId: colony.id,
+      antId: ant.id,
+      targetColonyId: targetColony.id,
+      amount: stolen,
+    });
+  }
+
+  depositLoot(ant, colony) {
+    const amount = ant.raidCargo;
+    if (amount <= 0) return;
+    ant.raidCargo = 0;
+    colony.depositFood(amount);
+    colony.foodRecovered += amount;
+    colony.raidersReturnedWithLoot += 1;
+    this.emitEvent("RAIDER_RETURNED_WITH_LOOT", { colonyId: colony.id, antId: ant.id, amount });
+  }
+
+  dropLoot(ant, colony) {
+    const amount = ant.raidCargo;
+    if (amount <= 0) return;
+    ant.raidCargo = 0;
+    const drop = new FoodSource({
+      id: `LOOT-${colony.id}-${ant.id}-${this.tickCount}`,
+      x: ant.position.x,
+      y: ant.position.y,
+      quantity: amount,
+      radius: this.config.foodSourceRadius,
+    });
+    this.foodSources.push(drop);
+    colony.foodDropped += amount;
+    colony.raidersKilledWithLoot += 1;
+    this.emitEvent("RAID_LOOT_DROPPED", {
+      colonyId: colony.id,
+      antId: ant.id,
+      amount,
+      position: { ...ant.position },
+    });
   }
 
   resolveRaidMemberOutcome(ant, colony, outcome) {
@@ -831,7 +900,7 @@ export class Simulation {
     const removed = this.colonies[index];
     this.removedColonyFood += removed.foodStock
       + removed.consumedFood
-      + removed.ants.reduce((sum, ant) => sum + ant.carryingFoodAmount, 0);
+      + removed.ants.reduce((sum, ant) => sum + ant.carryingFoodAmount + ant.raidCargo, 0);
     this.colonies.splice(index, 1);
     this.colonyConfigs.delete(colonyId);
     this.colonyPheromones.fields.delete(colonyId);
@@ -1121,6 +1190,7 @@ export class Simulation {
       maxHealth: isSoldier ? colonyConfig.soldierMaxHealth : colonyConfig.combatMaxHealth,
       attackPower: isSoldier ? colonyConfig.soldierAttackPower : colonyConfig.combatAttackPower,
       caste,
+      raidCarryCapacity: colonyConfig.raidCarryCapacity,
     });
     this.nextAntIds.set(colony.id, this.nextAntIds.get(colony.id) + 1);
     colony.ants.push(ant);
@@ -1349,6 +1419,13 @@ export class Simulation {
       defensiveKills: colony.defensiveKills,
       workersEvacuated: colony.workersEvacuated,
       nestAlarmIntensity: field.sample(PheromoneType.ALARM, colony.nest.position) / field.maxIntensity,
+      foodStolen: colony.foodStolen,
+      foodRecovered: colony.foodRecovered,
+      foodDropped: colony.foodDropped,
+      foodLostToRaids: colony.foodLostToRaids,
+      raidersReturnedWithLoot: colony.raidersReturnedWithLoot,
+      raidersKilledWithLoot: colony.raidersKilledWithLoot,
+      raidCargoInTransit: colony.ants.reduce((sum, ant) => sum + ant.raidCargo, 0),
       foodPheromones,
       homePheromones,
       alarmPheromones,

@@ -10,7 +10,7 @@ import { Renderer } from "./rendering/Renderer.js";
 import { Simulation } from "./simulation/Simulation.js";
 import { DEFAULT_CONFIG } from "./simulation/SimulationConfig.js";
 
-const simulation = new Simulation(configForPreset("symmetric-competition"));
+const simulation = new Simulation(configForPreset("complete-v1.4"));
 const APP_VERSION = "1.1.0";
 const renderer = new Renderer(document.querySelector("#world"));
 const playPause = document.querySelector("#play-pause");
@@ -220,6 +220,12 @@ function renderColonyMetrics(colonies) {
       ["Kills (ouvr. / sold.)", `${colony.workerKills} / ${colony.soldierKills}`],
       ["Pertes combat (ouvr. / sold.)", `${colony.workerLosses} / ${colony.soldierLosses}`],
       ["Coût militaire", colony.militaryFoodCost.toFixed(1)],
+      ["Nids ennemis connus", colony.knownEnemyNests],
+      ["Nid sous menace", colony.nestUnderThreat ? "oui" : "non"],
+      ["Défenseurs mobilisés", `${colony.defendingNow} en cours · ${colony.defendersMobilized} total`],
+      ["Raids (lancés/réussis/échoués)", `${colony.raidsStarted} / ${colony.raidsCompleted} / ${colony.raidsFailed}`],
+      ["Nourriture volée / rapportée", `${colony.foodStolen.toFixed(1)} / ${colony.foodRecovered.toFixed(1)}`],
+      ["Butin perdu au sol", colony.foodDropped.toFixed(1)],
     ];
     for (const [label, value] of rows) {
       const term = document.createElement("dt");
@@ -343,7 +349,9 @@ document.querySelector("#territory-layer").addEventListener("change", (event) =>
 // différents par colonie ; ces clés priment sur la config globale. Le
 // formulaire ne propose que des réglages symétriques, donc on les retire des
 // colonies au moment d'appliquer pour que les curseurs aient un effet visible.
-const COLONY_OVERRIDE_KEYS_TO_RESET = [...CONFIG_SECTIONS.combat, ...CONFIG_SECTIONS.castes];
+const COLONY_OVERRIDE_KEYS_TO_RESET = [
+  ...CONFIG_SECTIONS.combat, ...CONFIG_SECTIONS.castes, ...CONFIG_SECTIONS.raids,
+];
 
 document.querySelector("#parameters-form").addEventListener("submit", (event) => {
   event.preventDefault();
@@ -399,6 +407,13 @@ document.querySelector("#parameters-form").addEventListener("submit", (event) =>
     casteSoldierRatioCap: Number(document.querySelector("#param-caste-ratio-cap").value),
     casteStockThreshold: Number(document.querySelector("#param-caste-stock-threshold").value),
     threatPressureRatioScale: Number(document.querySelector("#param-threat-pressure-scale").value),
+    pillageEnabled: document.querySelector("#param-pillage-enabled").checked,
+    raidCarryCapacity: Number(document.querySelector("#param-raid-carry-capacity").value),
+    autoRaidEnabled: document.querySelector("#param-auto-raid-enabled").checked,
+    minRaidSize: Number(document.querySelector("#param-min-raid-size").value),
+    maxRaidSize: Number(document.querySelector("#param-max-raid-size").value),
+    minStockToRaid: Number(document.querySelector("#param-min-stock-to-raid").value),
+    raidCooldownTicks: Number(document.querySelector("#param-raid-cooldown").value),
   });
   resetAnalytics();
   accumulator = 0;
@@ -449,6 +464,11 @@ function applyConfigToForm(config) {
     "#param-caste-ratio-cap": config.casteSoldierRatioCap,
     "#param-caste-stock-threshold": config.casteStockThreshold,
     "#param-threat-pressure-scale": config.threatPressureRatioScale,
+    "#param-raid-carry-capacity": config.raidCarryCapacity,
+    "#param-min-raid-size": config.minRaidSize,
+    "#param-max-raid-size": config.maxRaidSize,
+    "#param-min-stock-to-raid": config.minStockToRaid,
+    "#param-raid-cooldown": config.raidCooldownTicks,
   };
   for (const [selector, value] of Object.entries(values)) {
     document.querySelector(selector).value = value;
@@ -458,6 +478,8 @@ function applyConfigToForm(config) {
   document.querySelector("#param-alarm").checked = config.alarmPheromonesEnabled;
   document.querySelector("#param-combat-enabled").checked = config.combatEnabled;
   document.querySelector("#param-castes-enabled").checked = config.castesEnabled;
+  document.querySelector("#param-pillage-enabled").checked = config.pillageEnabled;
+  document.querySelector("#param-auto-raid-enabled").checked = config.autoRaidEnabled;
 }
 
 function loadConfiguration(config) {
@@ -485,7 +507,10 @@ for (const category of SCENARIO_CATEGORIES) {
   }
   elements.preset.append(group);
 }
-elements.preset.value = "symmetric-competition";
+elements.preset.value = "complete-v1.4";
+applyConfigToForm(simulation.config);
+const initialPreset = SCENARIO_PRESETS.find((candidate) => candidate.id === "complete-v1.4");
+if (initialPreset?.duration) elements.replayTick.value = initialPreset.duration;
 
 document.querySelector("#apply-preset").addEventListener("click", () => {
   loadConfiguration(configForPreset(elements.preset.value));
