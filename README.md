@@ -1,9 +1,9 @@
 # Formica Sim
 
 Un petit laboratoire visuel pour observer une colonie de fourmis dans un monde
-2D. La V0.5 transforme la nourriture en ressource vitale : le déplacement coûte
-de l'énergie, le nid nourrit les ouvrières avec son stock et les individus qui
-atteignent zéro meurent sans être supprimés de la simulation.
+2D. La V0.6 rend la population dynamique : une reine immobile transforme les
+surplus alimentaires en œufs, le couvain traverse trois stades et les nouvelles
+ouvrières rejoignent la collecte, le métabolisme et les réseaux de phéromones.
 
 ## Lancer le projet
 
@@ -21,7 +21,7 @@ Puis ouvrir <http://localhost:4173>.
 npm test
 ```
 
-Comparer les quatre régimes énergétiques pendant 50 000 ticks :
+Comparer les cinq régimes démographiques pendant 50 000 ticks :
 
 ```bash
 npm run benchmark
@@ -39,17 +39,24 @@ Le benchmark historique des réseaux de phéromones reste disponible :
 npm run benchmark:pheromones
 ```
 
+Le benchmark V0.5 de survie est également conservé :
+
+```bash
+npm run benchmark:survival
+```
+
 ## Architecture
 
 ```text
 src/
 ├── behaviors/{RandomWalk,SearchFoodBehavior,ReturnHomeBehavior}.js
-├── entities/{Ant,Colony,FoodSource,Nest}.js
+├── entities/{Ant,Colony,FoodSource,Nest,Queen,Brood}.js
 ├── rendering/Renderer.js
 ├── simulation/{Simulation,SimulationConfig,World,PheromoneField}.js
 ├── systems/{MovementSystem,FoodDetectionSystem,FoodCollectionSystem}.js
 ├── systems/{PheromoneDepositSystem,PheromoneSensingSystem,HomeDetectionSystem}.js
 ├── systems/MetabolismSystem.js
+├── systems/{BroodSystem,FoodRegenerationSystem}.js
 ├── main.js
 └── styles.css
 ```
@@ -112,6 +119,33 @@ Le bilan affiché vaut `nourriture rapportée - nourriture consommée`. Le stock
 initial est volontairement exclu de ce bilan, mais reste inclus dans la loi de
 conservation globale.
 
+## Reine, couvain et démographie V0.6
+
+La reine reste au centre du nid et pond uniquement si le stock dépasse le seuil
+de reproduction, si son cooldown est terminé et si `maxBrood` n'est pas atteint.
+Chaque ponte a un coût explicite. Le couvain suit le cycle :
+
+```text
+EGG → LARVA → PUPA → WORKER
+```
+
+Chaque élément mémorise son âge, son âge de stade, sa progression et sa
+consommation. Seules les larves demandent un entretien continu ; si le stock ne
+suffit pas, leur développement s'arrête sans créer de nourriture négative. Une
+pupe arrivée à maturité devient une ouvrière normale avec un identifiant unique.
+
+L'ordre budgétaire est déterministe à chaque tick :
+
+1. alimentation des ouvrières présentes au nid ;
+2. entretien minimal des larves ;
+3. nouvelle ponte éventuelle.
+
+La régénération des sources est bornée par leur quantité initiale et désactivée
+par défaut. Une source fractionnaire doit atteindre une unité avant de redevenir
+collectable. Le panneau de paramètres permet de régler la reproduction, le
+cooldown, le seuil de stock, la taille maximale du couvain, ses coûts et la
+régénération, avec reset reproductible.
+
 ## Benchmark des phéromones V0.4
 
 Le benchmark compare :
@@ -140,7 +174,7 @@ Sur les cinq seeds par défaut, les moyennes de collecte sont respectivement
 
 ## Benchmark de survie V0.5
 
-`npm run benchmark` compare un coût nul, faible, moyen et élevé pendant une durée
+`npm run benchmark:survival` compare un coût nul, faible, moyen et élevé pendant une durée
 fixe. Il mesure survie, stock final, collecte, consommation, bilan, ratio
 collecte/consommation, mortalité, énergie moyenne et distance moyenne.
 
@@ -155,3 +189,24 @@ D — coût élevé  EXTINCTION   0/50 vivante au tick 40 858
 
 Il n'y a toujours ni reproduction ni démographie : les différences observées
 proviennent uniquement du métabolisme, de la collecte et de la mortalité.
+
+## Benchmark démographique V0.6
+
+`npm run benchmark` compare reproduction désactivée, prudente, agressive,
+ressources rares et ressources abondantes. Il rapporte population finale et
+maximale, ouvrières vivantes, stock, âge moyen, naissances, morts, croissance
+nette et coût du couvain. `--seeds` et `--ticks` permettent les expériences
+longues sur plusieurs graines.
+
+Sur la seed de référence à 50 000 ticks :
+
+```text
+A — sans reproduction  50 ouvrières, population max.  51
+B — prudente           74 ouvrières, population max.  76
+C — agressive          60 ouvrières, pic à 77 après famine
+D — ressources rares    0 ouvrière, extinction au tick 35 576
+E — ressources abond. 109 ouvrières, population max. 112
+```
+
+La reine compte dans la population totale, tout comme le couvain, mais pas les
+ouvrières mortes. Il n'existe encore ni caste, ni soldat, ni génétique.

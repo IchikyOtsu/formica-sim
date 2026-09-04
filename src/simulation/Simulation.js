@@ -3,12 +3,16 @@ import { ReturnHomeBehavior } from "../behaviors/ReturnHomeBehavior.js";
 import { SearchFoodBehavior } from "../behaviors/SearchFoodBehavior.js";
 import { Ant, AntState } from "../entities/Ant.js";
 import { Colony } from "../entities/Colony.js";
+import { BroodStage } from "../entities/Brood.js";
 import { FoodSource } from "../entities/FoodSource.js";
 import { Nest } from "../entities/Nest.js";
+import { Queen } from "../entities/Queen.js";
+import { BroodSystem } from "../systems/BroodSystem.js";
 import { MovementSystem } from "../systems/MovementSystem.js";
 import { MetabolismSystem } from "../systems/MetabolismSystem.js";
 import { FoodCollectionSystem } from "../systems/FoodCollectionSystem.js";
 import { FoodDetectionSystem } from "../systems/FoodDetectionSystem.js";
+import { FoodRegenerationSystem } from "../systems/FoodRegenerationSystem.js";
 import { HomeDetectionSystem } from "../systems/HomeDetectionSystem.js";
 import { PheromoneDepositSystem } from "../systems/PheromoneDepositSystem.js";
 import { PheromoneSensingSystem } from "../systems/PheromoneSensingSystem.js";
@@ -33,6 +37,7 @@ export class Simulation {
     this.pheromoneDeposit = new PheromoneDepositSystem();
     this.homeDetection = new HomeDetectionSystem();
     this.metabolism = new MetabolismSystem();
+    this.foodRegeneration = new FoodRegenerationSystem();
     this.reset();
   }
 
@@ -47,6 +52,7 @@ export class Simulation {
     this.completionTick = null;
     this.random = seededRandom(this.config.seed);
     this.sensingRandom = seededRandom(this.config.seed ^ 0x9e3779b9);
+    this.birthRandom = seededRandom(this.config.seed ^ 0x85ebca6b);
     this.randomWalk = new RandomWalk(this.random, this.config.explorationStrength);
     this.searchFood = new SearchFoodBehavior(this.randomWalk, this.config.pheromoneInfluence);
     this.returnHome = new ReturnHomeBehavior(this.randomWalk, this.config.homeTrailInfluence);
@@ -65,6 +71,13 @@ export class Simulation {
       nest,
       initialFoodStock: this.config.initialFoodStock,
     });
+    this.colony.queen = new Queen({
+      id: "QUEEN-01",
+      colonyId: this.colony.id,
+      position: nest.position,
+      layingCooldownTicks: this.config.queenLayingCooldownTicks,
+    });
+    this.broodSystem = new BroodSystem();
     this.foodSources = this.config.foodSources.map((source) => new FoodSource(source));
     this.initialFoodQuantity = this.foodSources.reduce((total, source) => total + source.quantity, 0);
     this.totalDistance = 0;
@@ -73,6 +86,10 @@ export class Simulation {
     this.completedReturns = 0;
     this.exploredCells = new Set();
     this.lostFood = 0;
+    this.regeneratedFood = 0;
+    this.births = 0;
+    this.nextAntId = this.config.initialAnts + 1;
+    this.maxPopulation = this.config.initialAnts + 1;
 
     for (let index = 0; index < this.config.initialAnts; index += 1) {
       const angle = this.random() * Math.PI * 2;
@@ -97,6 +114,10 @@ export class Simulation {
 
   tick() {
     const deltaSeconds = this.config.tickDurationMs / 1000;
+    this.regeneratedFood += this.foodRegeneration.update(
+      this.foodSources,
+      this.config.foodRegenerationRate,
+    );
     if (this.config.pheromonesEnabled) {
       this.pheromoneField.update({
         evaporationRate: this.config.pheromoneEvaporationRate,
@@ -112,6 +133,7 @@ export class Simulation {
       if (ant.state === AntState.DEAD) continue;
 
       if (ant.state === AntState.RESTING) {
+        ant.age += deltaSeconds;
         if (this.metabolism.consumeEnergy(
           ant,
           0,
@@ -215,6 +237,12 @@ export class Simulation {
         }
       }
     }
+    const emergedWorkers = this.broodSystem.update(this.colony, this.config);
+    for (let index = 0; index < emergedWorkers; index += 1) this.spawnWorker();
+    this.births += emergedWorkers;
+    const currentPopulation = this.colony.ants.filter((ant) => ant.state !== AntState.DEAD).length
+      + this.colony.brood.length + 1;
+    this.maxPopulation = Math.max(this.maxPopulation, currentPopulation);
     this.tickCount += 1;
     this.elapsedMs += this.config.tickDurationMs;
     if (this.completionTick === null && this.colony.resources === this.initialFoodQuantity) {
@@ -224,10 +252,35 @@ export class Simulation {
 
   handleDeath(ant) {
     if (ant.carryingFood) {
-      this.lostFood += 1;
+      this.lostFood += ant.carryingFoodAmount;
       ant.carryingFood = false;
+      ant.carryingFoodAmount = 0;
     }
     ant.returnStartedTick = null;
+  }
+
+  spawnWorker() {
+    const nest = this.colony.nest;
+    const angle = this.birthRandom() * Math.PI * 2;
+    const distance = this.birthRandom() * nest.radius * 0.55;
+    const ant = new Ant({
+      id: `ANT-${String(this.nextAntId).padStart(3, "0")}`,
+      position: {
+        x: nest.position.x + Math.cos(angle) * distance,
+        y: nest.position.y + Math.sin(angle) * distance,
+      },
+      direction: this.birthRandom() * Math.PI * 2,
+      speed: this.config.antSpeed * (0.75 + this.birthRandom() * 0.5),
+      colonyId: this.colony.id,
+      energy: this.config.antMaxEnergy,
+      maxEnergy: this.config.antMaxEnergy,
+      energyConsumptionRate: this.config.energyConsumptionRate,
+      lowEnergyThreshold: this.config.lowEnergyThreshold,
+    });
+    this.nextAntId += 1;
+    this.colony.ants.push(ant);
+    this.rememberCell(ant);
+    return ant;
   }
 
   senseTrail(ant, type) {
@@ -264,6 +317,14 @@ export class Simulation {
     const homePheromones = this.pheromoneField.getStats(PheromoneType.HOME);
     const livingAnts = this.colony.ants.filter((ant) => ant.state !== AntState.DEAD);
     const energies = livingAnts.map((ant) => ant.energy);
+    const broodCounts = {
+      eggs: this.colony.brood.filter((brood) => brood.stage === BroodStage.EGG).length,
+      larvae: this.colony.brood.filter((brood) => brood.stage === BroodStage.LARVA).length,
+      pupae: this.colony.brood.filter((brood) => brood.stage === BroodStage.PUPA).length,
+    };
+    const averageWorkerAge = livingAnts.length === 0
+      ? 0
+      : livingAnts.reduce((total, ant) => total + ant.age, 0) / livingAnts.length;
     const averageEnergy = energies.length === 0
       ? 0
       : energies.reduce((total, energy) => total + energy, 0) / energies.length;
@@ -271,11 +332,27 @@ export class Simulation {
       tick: this.tickCount,
       ants: livingAnts.length,
       totalAnts: this.colony.ants.length,
+      totalPopulation: livingAnts.length + this.colony.brood.length + 1,
+      maxPopulation: this.maxPopulation,
       livingAnts: livingAnts.length,
       deadAnts: this.colony.ants.length - livingAnts.length,
       restingAnts: livingAnts.filter((ant) => ant.state === AntState.RESTING).length,
       averageEnergy,
       minimumEnergy: energies.length === 0 ? 0 : Math.min(...energies),
+      averageWorkerAge,
+      births: this.births,
+      deaths: this.colony.ants.length - livingAnts.length,
+      netGrowth: this.births - (this.colony.ants.length - livingAnts.length),
+      birthRate: this.tickCount === 0 ? 0 : this.births / this.tickCount * 1000,
+      deathRate: this.tickCount === 0
+        ? 0
+        : (this.colony.ants.length - livingAnts.length) / this.tickCount * 1000,
+      eggs: broodCounts.eggs,
+      larvae: broodCounts.larvae,
+      pupae: broodCounts.pupae,
+      broodSize: this.colony.brood.length,
+      broodFoodCost: this.broodSystem.broodFoodConsumed,
+      reproductionFoodCost: this.broodSystem.layingFoodConsumed,
       foodSources: this.foodSources.filter((source) => source.active).length,
       foodRemaining: this.foodSources.reduce((total, source) => total + source.quantity, 0),
       resources: this.colony.resources,
@@ -286,6 +363,11 @@ export class Simulation {
         ? null
         : this.colony.resources / this.colony.consumedFood,
       lostFood: this.lostFood,
+      regeneratedFood: this.regeneratedFood,
+      carriedFood: this.colony.ants.reduce(
+        (total, ant) => total + ant.carryingFoodAmount,
+        0,
+      ),
       carryingAnts: this.colony.ants.filter((ant) => ant.carryingFood).length,
       pheromoneTotal: foodPheromones.total + homePheromones.total,
       pheromoneCells: foodPheromones.activeCells + homePheromones.activeCells,

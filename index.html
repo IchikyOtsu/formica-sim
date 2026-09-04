@@ -19,7 +19,7 @@
           </span>
           <div>
             <p class="eyebrow">Laboratoire de terrain</p>
-            <h1>FORMICA <span>/ SIM V0.5</span></h1>
+            <h1>FORMICA <span>/ SIM V0.6</span></h1>
           </div>
         </div>
         <div class="status-pill"><span></span> Système opérationnel</div>
@@ -36,7 +36,7 @@
           <div class="metric-grid">
             <article class="metric metric-wide">
               <p>Fourmis vivantes</p>
-              <strong id="ant-count">0</strong><span>/ <b id="total-ant-count">0</b> individus</span>
+              <strong id="ant-count">0</strong><span>/ <b id="total-ant-count">0</b> population totale</span>
             </article>
             <article class="metric">
               <p>Sources</p>
@@ -54,6 +54,23 @@
               <p>Chargées</p>
               <strong id="carrying-ants">0</strong><span>fourmis</span>
             </article>
+          </div>
+
+          <div class="demography-panel">
+            <p class="section-label">Démographie</p>
+            <div class="signal-stats brood-stages">
+              <p><strong id="egg-count">0</strong><span>Œufs</span></p>
+              <p><strong id="larva-count">0</strong><span>Larves</span></p>
+              <p><strong id="pupa-count">0</strong><span>Pupes</span></p>
+            </div>
+            <div class="economy-stats">
+              <p><span>Naissances</span><strong id="birth-count">0</strong></p>
+              <p><span>Croissance</span><strong id="net-growth">0</strong></p>
+              <p><span>Population max.</span><strong id="max-population">0</strong></p>
+              <p><span>Coût couvain</span><strong id="brood-cost">0</strong></p>
+              <p><span>Naissances / 1k</span><strong id="birth-rate">0</strong></p>
+              <p><span>Morts / 1k</span><strong id="death-rate">0</strong></p>
+            </div>
           </div>
 
           <div class="metabolism-panel">
@@ -88,6 +105,8 @@
             <div><span class="legend-dot return-dot"></span> Fourmi <em>Retour au nid</em></div>
             <div><span class="legend-dot resting-dot"></span> Fourmi <em>Repos / faim</em></div>
             <div><span class="legend-dot dead-dot"></span> Fourmi <em>Morte</em></div>
+            <div><span class="legend-dot queen-dot"></span> Reine <em>Immobile au nid</em></div>
+            <div><span class="legend-dot brood-dot"></span> Couvain <em>Œuf · larve · pupe</em></div>
             <div><span class="legend-dot nest-dot"></span> Nid <em>Point d'origine</em></div>
             <div><span class="legend-dot food-dot"></span> Nourriture <em>Ressource</em></div>
             <div><span class="legend-dot food-pheromone-dot"></span> FOOD <em>Vers nourriture</em></div>
@@ -96,7 +115,7 @@
 
           <div class="observation">
             <p class="section-label">Observation</p>
-            <p>Le mouvement consomme de l'énergie. Les ouvrières affamées suivent HOME, se nourrissent au nid ou meurent si elles l'épuisent.</p>
+            <p>Après les ouvrières et les larves, la reine investit le surplus du nid dans de nouvelles ouvrières.</p>
           </div>
         </aside>
 
@@ -145,6 +164,13 @@
               <label>Seuil retour<input id="param-low-energy" type="number" min="0" max="1" step="0.05" value="0.4" /></label>
               <label>Énergie / aliment<input id="param-food-energy" type="number" min="1" max="200" step="1" value="30" /></label>
               <label>Stock initial<input id="param-initial-stock" type="number" min="0" max="1000" step="1" value="10" /></label>
+              <label class="check-label">Reproduction<input id="param-reproduction" type="checkbox" checked /></label>
+              <label>Cooldown ponte<input id="param-laying-cooldown" type="number" min="1" max="100000" step="100" value="1500" /></label>
+              <label>Seuil de ponte<input id="param-reproduction-threshold" type="number" min="0" max="1000" step="1" value="45" /></label>
+              <label>Couvain max.<input id="param-max-brood" type="number" min="1" max="100" step="1" value="12" /></label>
+              <label>Coût d'un œuf<input id="param-egg-cost" type="number" min="0" max="20" step="0.1" value="0.5" /></label>
+              <label>Conso. larve/tick<input id="param-larva-food" type="number" min="0" max="1" step="0.001" value="0.002" /></label>
+              <label>Régénération/source<input id="param-food-regen" type="number" min="0" max="0.1" step="0.0001" value="0" /></label>
               <button type="submit">Appliquer + Reset</button>
             </form>
           </details>

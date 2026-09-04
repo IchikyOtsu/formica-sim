@@ -13,6 +13,7 @@ export class FoodCollectionSystem {
     const collected = source.take(1);
     if (collected === 0) return false;
     ant.carryingFood = true;
+    ant.carryingFoodAmount = collected;
     ant.state = AntState.RETURNING_HOME;
     ant.target = null;
     ant.direction += Math.PI;
@@ -25,8 +26,9 @@ export class FoodCollectionSystem {
     if (!ant.carryingFood) return false;
     if (distance(ant.position, colony.nest.position) > colony.nest.radius) return false;
 
-    colony.depositFood(1);
+    colony.depositFood(ant.carryingFoodAmount);
     ant.carryingFood = false;
+    ant.carryingFoodAmount = 0;
     ant.state = AntState.SEARCHING_FOOD;
     ant.target = null;
     ant.direction += Math.PI;

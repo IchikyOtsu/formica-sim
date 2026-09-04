@@ -28,7 +28,13 @@ const experiments = [
 ];
 
 function run(config, seed) {
-  const simulation = new Simulation({ ...DEFAULT_CONFIG, ...config, seed });
+  const simulation = new Simulation({
+    ...DEFAULT_CONFIG,
+    reproductionEnabled: false,
+    foodRegenerationRate: 0,
+    ...config,
+    seed,
+  });
   while (simulation.completionTick === null && simulation.tickCount < tickLimit) simulation.tick();
   const metrics = simulation.getMetrics();
   return {

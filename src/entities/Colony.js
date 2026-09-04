@@ -7,6 +7,8 @@ export class Colony {
     this.foodStock = initialFoodStock;
     this.consumedFood = 0;
     this.ants = [];
+    this.queen = null;
+    this.brood = [];
   }
 
   depositFood(amount) {

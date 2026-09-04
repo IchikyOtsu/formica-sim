@@ -17,7 +17,13 @@ const experiments = [
 ];
 
 function run(experiment, seed) {
-  const simulation = new Simulation({ ...DEFAULT_CONFIG, ...experiment, seed });
+  const simulation = new Simulation({
+    ...DEFAULT_CONFIG,
+    reproductionEnabled: false,
+    foodRegenerationRate: 0,
+    ...experiment,
+    seed,
+  });
   while (simulation.tickCount < duration
     && simulation.colony.ants.some((ant) => ant.state !== AntState.DEAD)) {
     simulation.tick();

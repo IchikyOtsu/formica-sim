@@ -1,5 +1,6 @@
 import { PheromoneType } from "../simulation/PheromoneField.js";
 import { AntState } from "../entities/Ant.js";
+import { BroodStage } from "../entities/Brood.js";
 
 export class Renderer {
   constructor(canvas) {
@@ -46,6 +47,7 @@ export class Renderer {
       if (source.active) this.drawFood(ctx, source);
     }
     this.drawNest(ctx, colony.nest);
+    this.drawQueenAndBrood(ctx, colony);
     for (const ant of colony.ants) this.drawAnt(ctx, ant);
   }
 
@@ -117,6 +119,42 @@ export class Renderer {
     for (const [offsetX, offsetY] of seeds.slice(0, visibleSeeds)) {
       ctx.beginPath(); ctx.arc(x + offsetX, y + offsetY, 4, 0, Math.PI * 2); ctx.fill();
     }
+  }
+
+  drawQueenAndBrood(ctx, colony) {
+    const { x, y } = colony.nest.position;
+    const stageColors = {
+      [BroodStage.EGG]: "#eee4c9",
+      [BroodStage.LARVA]: "#d8bd8d",
+      [BroodStage.PUPA]: "#a9825f",
+    };
+    colony.brood.forEach((brood, index) => {
+      const angle = index * 2.4;
+      const ring = 12 + (index % 3) * 4;
+      ctx.fillStyle = stageColors[brood.stage];
+      ctx.beginPath();
+      ctx.ellipse(
+        x + Math.cos(angle) * ring,
+        y + Math.sin(angle) * ring,
+        2.2,
+        1.5,
+        angle,
+        0,
+        Math.PI * 2,
+      );
+      ctx.fill();
+    });
+
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.fillStyle = "#f1c36f";
+    ctx.beginPath(); ctx.ellipse(0, 0, 7, 4, -0.2, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#3a281b";
+    ctx.beginPath(); ctx.arc(5, -1, 2.5, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = "#f1c36f";
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(-3, -5); ctx.lineTo(-1, -8); ctx.lineTo(1, -5); ctx.lineTo(3, -8); ctx.lineTo(5, -5); ctx.stroke();
+    ctx.restore();
   }
 
   drawAnt(ctx, ant) {

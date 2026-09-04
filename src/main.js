@@ -15,6 +15,15 @@ const elements = {
   tick: document.querySelector("#tick"),
   ants: document.querySelector("#ant-count"),
   totalAnts: document.querySelector("#total-ant-count"),
+  eggs: document.querySelector("#egg-count"),
+  larvae: document.querySelector("#larva-count"),
+  pupae: document.querySelector("#pupa-count"),
+  births: document.querySelector("#birth-count"),
+  netGrowth: document.querySelector("#net-growth"),
+  maxPopulation: document.querySelector("#max-population"),
+  broodCost: document.querySelector("#brood-cost"),
+  birthRate: document.querySelector("#birth-rate"),
+  deathRate: document.querySelector("#death-rate"),
   deadAnts: document.querySelector("#dead-ants"),
   restingAnts: document.querySelector("#resting-ants"),
   averageEnergy: document.querySelector("#average-energy"),
@@ -46,7 +55,18 @@ function updateMetrics() {
   const metrics = simulation.getMetrics();
   elements.tick.textContent = String(metrics.tick).padStart(6, "0");
   elements.ants.textContent = metrics.ants;
-  elements.totalAnts.textContent = metrics.totalAnts;
+  elements.totalAnts.textContent = metrics.totalPopulation;
+  elements.eggs.textContent = metrics.eggs;
+  elements.larvae.textContent = metrics.larvae;
+  elements.pupae.textContent = metrics.pupae;
+  elements.births.textContent = metrics.births;
+  elements.netGrowth.textContent = metrics.netGrowth > 0
+    ? `+${metrics.netGrowth}`
+    : metrics.netGrowth;
+  elements.maxPopulation.textContent = metrics.maxPopulation;
+  elements.broodCost.textContent = (metrics.broodFoodCost + metrics.reproductionFoodCost).toFixed(1);
+  elements.birthRate.textContent = metrics.birthRate.toFixed(2);
+  elements.deathRate.textContent = metrics.deathRate.toFixed(2);
   elements.deadAnts.textContent = metrics.deadAnts;
   elements.restingAnts.textContent = metrics.restingAnts;
   elements.averageEnergy.textContent = metrics.averageEnergy.toFixed(1);
@@ -58,7 +78,7 @@ function updateMetrics() {
     ? "—"
     : metrics.collectionConsumptionRatio.toFixed(2);
   elements.food.textContent = metrics.foodSources;
-  elements.foodRemaining.textContent = metrics.foodRemaining;
+  elements.foodRemaining.textContent = Number(metrics.foodRemaining.toFixed(1));
   elements.resources.textContent = metrics.resources;
   elements.carryingAnts.textContent = metrics.carryingAnts;
   elements.pheromoneTotal.textContent = metrics.pheromoneTotal.toFixed(0);
@@ -118,6 +138,13 @@ document.querySelector("#parameters-form").addEventListener("submit", (event) =>
     lowEnergyThreshold: Number(document.querySelector("#param-low-energy").value),
     foodEnergyValue: Number(document.querySelector("#param-food-energy").value),
     initialFoodStock: Number(document.querySelector("#param-initial-stock").value),
+    reproductionEnabled: document.querySelector("#param-reproduction").checked,
+    queenLayingCooldownTicks: Number(document.querySelector("#param-laying-cooldown").value),
+    reproductionFoodThreshold: Number(document.querySelector("#param-reproduction-threshold").value),
+    maxBrood: Number(document.querySelector("#param-max-brood").value),
+    eggFoodCost: Number(document.querySelector("#param-egg-cost").value),
+    larvaFoodPerTick: Number(document.querySelector("#param-larva-food").value),
+    foodRegenerationRate: Number(document.querySelector("#param-food-regen").value),
   });
   accumulator = 0;
   updateMetrics();

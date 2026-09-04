@@ -3,6 +3,7 @@ import test from "node:test";
 import { SearchFoodBehavior } from "../src/behaviors/SearchFoodBehavior.js";
 import { ReturnHomeBehavior } from "../src/behaviors/ReturnHomeBehavior.js";
 import { Ant, AntState } from "../src/entities/Ant.js";
+import { Brood, BroodStage } from "../src/entities/Brood.js";
 import { FoodSource } from "../src/entities/FoodSource.js";
 import { PheromoneField, PheromoneType } from "../src/simulation/PheromoneField.js";
 import { Renderer } from "../src/rendering/Renderer.js";
@@ -350,7 +351,11 @@ test("recent-cell memory remains short", () => {
 
 test("all four benchmark modes complete and V0.4 returns without GPS", () => {
   function run(overrides) {
-    const simulation = new Simulation({ ...DEFAULT_CONFIG, ...overrides });
+    const simulation = new Simulation({
+      ...DEFAULT_CONFIG,
+      reproductionEnabled: false,
+      ...overrides,
+    });
     while (simulation.completionTick === null && simulation.tickCount < 30_000) {
       simulation.tick();
     }
@@ -535,4 +540,189 @@ test("reset restores energy, mortality, stock, and consumption", () => {
   assert.equal(metrics.foodStock, 4);
   assert.equal(metrics.consumedFood, 0);
   assert.equal(metrics.lostFood, 0);
+});
+
+test("brood develops EGG to LARVA to PUPA and consumes only as a larva", () => {
+  const simulation = new Simulation(foragingConfig({
+    initialFoodStock: 100,
+    queenLayingCooldownTicks: 100,
+    reproductionFoodThreshold: 0,
+    eggFoodCost: 1,
+    maxBrood: 1,
+    eggDurationTicks: 2,
+    larvaDurationTicks: 2,
+    pupaDurationTicks: 2,
+    larvaFoodPerTick: 0.5,
+  }));
+  const system = simulation.broodSystem;
+  system.update(simulation.colony, simulation.config);
+  assert.equal(simulation.colony.brood[0].stage, BroodStage.EGG);
+  system.update(simulation.colony, simulation.config);
+  system.update(simulation.colony, simulation.config);
+  assert.equal(simulation.colony.brood[0].stage, BroodStage.LARVA);
+  system.update(simulation.colony, simulation.config);
+  system.update(simulation.colony, simulation.config);
+  assert.equal(simulation.colony.brood[0].stage, BroodStage.PUPA);
+  system.update(simulation.colony, simulation.config);
+  const emerged = system.update(simulation.colony, simulation.config);
+  assert.equal(emerged, 1);
+  assert.equal(simulation.colony.brood.length, 0);
+  assert.equal(system.broodFoodConsumed, 1);
+  assert.equal(system.layingFoodConsumed, 1);
+});
+
+test("an emerged pupa becomes a normal uniquely identified worker", () => {
+  const simulation = new Simulation(foragingConfig({
+    initialAnts: 0,
+    initialFoodStock: 10,
+    reproductionFoodThreshold: 0,
+    queenLayingCooldownTicks: 100,
+    eggFoodCost: 0,
+    maxBrood: 1,
+    eggDurationTicks: 1,
+    larvaDurationTicks: 1,
+    pupaDurationTicks: 1,
+    larvaFoodPerTick: 0,
+  }));
+  for (let index = 0; index < 4; index += 1) simulation.tick();
+  assert.equal(simulation.births, 1);
+  assert.equal(simulation.colony.ants.length, 1);
+  assert.equal(simulation.colony.ants[0].id, "ANT-001");
+  assert.equal(simulation.colony.ants[0].state, AntState.SEARCHING_FOOD);
+});
+
+test("worker survival is funded before brood and new eggs", () => {
+  const simulation = new Simulation(foragingConfig({
+    initialFoodStock: 1,
+    reproductionFoodThreshold: 0,
+    eggFoodCost: 0.5,
+    maxBrood: 2,
+    foodEnergyValue: 100,
+  }));
+  const ant = simulation.colony.ants[0];
+  ant.energy = 0.1;
+  ant.state = AntState.RESTING;
+  simulation.tick();
+  assert.equal(ant.state, AntState.SEARCHING_FOOD);
+  assert.equal(simulation.colony.brood.length, 0);
+  assert.ok(simulation.colony.foodStock < 0.01);
+});
+
+test("larval maintenance is funded before a new egg", () => {
+  const simulation = new Simulation(foragingConfig({
+    initialFoodStock: 0.5,
+    reproductionFoodThreshold: 0,
+    eggFoodCost: 0.5,
+    larvaFoodPerTick: 0.5,
+    larvaDurationTicks: 10,
+  }));
+  const larva = new Brood({ id: "LARVA-TEST" });
+  larva.stage = BroodStage.LARVA;
+  simulation.colony.brood.push(larva);
+  simulation.broodSystem.update(simulation.colony, simulation.config);
+  assert.equal(larva.foodConsumed, 0.5);
+  assert.equal(simulation.colony.brood.length, 1);
+  assert.equal(simulation.colony.queen.eggsLaid, 0);
+});
+
+test("queen respects stock threshold, cooldown, and maximum brood", () => {
+  const simulation = new Simulation(foragingConfig({
+    initialFoodStock: 20,
+    reproductionFoodThreshold: 10,
+    queenLayingCooldownTicks: 5,
+    eggFoodCost: 1,
+    maxBrood: 1,
+  }));
+  simulation.broodSystem.update(simulation.colony, simulation.config);
+  assert.equal(simulation.colony.brood.length, 1);
+  assert.equal(simulation.colony.queen.cooldownRemaining, 5);
+  simulation.broodSystem.update(simulation.colony, simulation.config);
+  assert.equal(simulation.colony.brood.length, 1);
+  simulation.colony.brood = [];
+  simulation.colony.foodStock = 5;
+  for (let index = 0; index < 5; index += 1) {
+    simulation.broodSystem.update(simulation.colony, simulation.config);
+  }
+  assert.equal(simulation.colony.brood.length, 0);
+});
+
+test("food regeneration is bounded and waits for a collectable unit", () => {
+  const simulation = new Simulation(foragingConfig({
+    foodSources: [{ x: 70, y: 40, quantity: 2, radius: 5 }],
+  }));
+  const source = simulation.foodSources[0];
+  source.take(2);
+  assert.equal(source.active, false);
+  assert.equal(source.regenerate(0.4), 0.4);
+  assert.equal(source.active, false);
+  source.regenerate(0.6);
+  assert.equal(source.active, true);
+  assert.equal(source.regenerate(10), 1);
+  assert.equal(source.quantity, source.initialQuantity);
+});
+
+test("demographic metrics and reset include queen, brood, births, and deaths", () => {
+  const simulation = new Simulation(foragingConfig({
+    initialAnts: 2,
+    initialFoodStock: 20,
+    reproductionFoodThreshold: 0,
+  }));
+  simulation.colony.ants[0].state = AntState.DEAD;
+  simulation.births = 3;
+  simulation.colony.brood.push(new Brood({ id: "METRIC-EGG" }));
+  simulation.maxPopulation = 8;
+  let metrics = simulation.getMetrics();
+  assert.equal(metrics.totalPopulation, 3);
+  assert.equal(metrics.births, 3);
+  assert.equal(metrics.deaths, 1);
+  assert.equal(metrics.netGrowth, 2);
+  assert.equal(metrics.eggs, 1);
+  assert.equal(metrics.maxPopulation, 8);
+  simulation.reset();
+  metrics = simulation.getMetrics();
+  assert.equal(metrics.totalPopulation, 3);
+  assert.equal(metrics.births, 0);
+  assert.equal(metrics.deaths, 0);
+  assert.equal(metrics.broodSize, 0);
+  assert.equal(simulation.colony.queen.eggsLaid, 0);
+});
+
+test("regenerated food remains conserved across environment and colony", () => {
+  const simulation = new Simulation(foragingConfig({
+    initialFoodStock: 3,
+    foodRegenerationRate: 0.01,
+  }));
+  for (let index = 0; index < 500; index += 1) simulation.tick();
+  const metrics = simulation.getMetrics();
+  const initialFood = simulation.initialFoodQuantity + simulation.config.initialFoodStock;
+  const accounted = metrics.foodRemaining + metrics.foodStock + metrics.consumedFood
+    + metrics.carriedFood + metrics.lostFood;
+  assert.ok(Math.abs(initialFood + metrics.regeneratedFood - accounted) < 1e-8);
+});
+
+test("aggressive reproduction can cause a boom followed by famine and contraction", () => {
+  const simulation = new Simulation(foragingConfig({
+    initialAnts: 5,
+    initialFoodStock: 30,
+    foodSources: [{ x: 60, y: 40, quantity: 20, radius: 6 }],
+    directHomeNavigation: true,
+    queenLayingCooldownTicks: 5,
+    reproductionFoodThreshold: 1,
+    eggFoodCost: 0.1,
+    maxBrood: 20,
+    eggDurationTicks: 10,
+    larvaDurationTicks: 10,
+    pupaDurationTicks: 10,
+    larvaFoodPerTick: 0.1,
+    energyConsumptionRate: 0.05,
+    basalEnergyConsumptionRate: 0.1,
+    foodEnergyValue: 10,
+  }));
+  for (let index = 0; index < 5_000; index += 1) simulation.tick();
+  const metrics = simulation.getMetrics();
+  assert.ok(metrics.births > 0);
+  assert.ok(metrics.deaths > 0);
+  assert.ok(metrics.maxPopulation > metrics.totalPopulation);
+  assert.equal(metrics.foodStock, 0);
+  assert.ok(metrics.netGrowth < metrics.births);
 });

@@ -35,6 +35,7 @@ export class Ant {
     this.energyConsumptionRate = energyConsumptionRate;
     this.lowEnergyThreshold = lowEnergyThreshold;
     this.carryingFood = false;
+    this.carryingFoodAmount = 0;
     this.age = 0;
     this.target = null;
     this.distanceSinceNest = 0;

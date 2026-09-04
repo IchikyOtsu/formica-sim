@@ -7,7 +7,7 @@ export class FoodSource {
   }
 
   get active() {
-    return this.quantity > 0;
+    return this.quantity >= 1;
   }
 
   take(amount = 1) {
@@ -15,5 +15,12 @@ export class FoodSource {
     const collected = Math.min(amount, this.quantity);
     this.quantity -= collected;
     return collected;
+  }
+
+  regenerate(amount) {
+    if (amount <= 0 || this.quantity >= this.initialQuantity) return 0;
+    const regenerated = Math.min(amount, this.initialQuantity - this.quantity);
+    this.quantity += regenerated;
+    return regenerated;
   }
 }
