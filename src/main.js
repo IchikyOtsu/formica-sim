@@ -15,7 +15,9 @@ const elements = {
   tick: document.querySelector("#tick"),
   ants: document.querySelector("#ant-count"),
   food: document.querySelector("#food-count"),
+  foodRemaining: document.querySelector("#food-remaining"),
   resources: document.querySelector("#resources"),
+  carryingAnts: document.querySelector("#carrying-ants"),
   time: document.querySelector("#sim-time"),
 };
 
@@ -32,7 +34,9 @@ function updateMetrics() {
   elements.tick.textContent = String(metrics.tick).padStart(6, "0");
   elements.ants.textContent = metrics.ants;
   elements.food.textContent = metrics.foodSources;
+  elements.foodRemaining.textContent = metrics.foodRemaining;
   elements.resources.textContent = metrics.resources;
+  elements.carryingAnts.textContent = metrics.carryingAnts;
   elements.time.textContent = formatTime(metrics.elapsedMs);
 }
 

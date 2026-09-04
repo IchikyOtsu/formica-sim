@@ -1,8 +1,9 @@
 export class MovementSystem {
-  update(ant, world, deltaSeconds) {
+  update(ant, world, deltaSeconds, maxDistance = Infinity) {
+    const distance = Math.min(ant.speed * deltaSeconds, maxDistance);
     const next = {
-      x: ant.position.x + Math.cos(ant.direction) * ant.speed * deltaSeconds,
-      y: ant.position.y + Math.sin(ant.direction) * ant.speed * deltaSeconds,
+      x: ant.position.x + Math.cos(ant.direction) * distance,
+      y: ant.position.y + Math.sin(ant.direction) * distance,
     };
 
     if (next.x < 3 || next.x > world.width - 3) {

@@ -61,18 +61,19 @@ export class Simulation {
   tick() {
     const deltaSeconds = this.config.tickDurationMs / 1000;
     for (const ant of this.colony.ants) {
+      let targetDistance;
       if (ant.state === AntState.RETURNING_HOME) {
-        this.returnHome.update(ant, this.colony.nest);
+        targetDistance = this.returnHome.update(ant, this.colony.nest);
       } else {
         const food = this.foodDetection.findNearest(
           ant,
           this.foodSources,
           this.config.foodDetectionRadius,
         );
-        this.searchFood.update(ant, food, deltaSeconds);
+        targetDistance = this.searchFood.update(ant, food, deltaSeconds);
       }
 
-      this.movement.update(ant, this.world, deltaSeconds);
+      this.movement.update(ant, this.world, deltaSeconds, targetDistance);
 
       if (ant.state === AntState.RETURNING_HOME) {
         this.foodCollection.deposit(ant, this.colony);

@@ -4,5 +4,6 @@ export class ReturnHomeBehavior {
     const dy = nest.position.y - ant.position.y;
     ant.target = nest;
     ant.direction = Math.atan2(dy, dx);
+    return Math.hypot(dx, dy);
   }
 }

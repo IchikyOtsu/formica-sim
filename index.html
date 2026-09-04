@@ -19,7 +19,7 @@
           </span>
           <div>
             <p class="eyebrow">Laboratoire de terrain</p>
-            <h1>FORMICA <span>/ SIM</span></h1>
+            <h1>FORMICA <span>/ SIM V0.2</span></h1>
           </div>
         </div>
         <div class="status-pill"><span></span> Système opérationnel</div>
@@ -43,21 +43,30 @@
               <strong id="food-count">0</strong>
             </article>
             <article class="metric">
-              <p>Réserves</p>
+              <p>Disponible</p>
+              <strong id="food-remaining">0</strong><span>unités</span>
+            </article>
+            <article class="metric">
+              <p>Rapportée</p>
               <strong id="resources">0</strong><span>unités</span>
+            </article>
+            <article class="metric">
+              <p>Chargées</p>
+              <strong id="carrying-ants">0</strong><span>fourmis</span>
             </article>
           </div>
 
           <div class="legend">
             <p class="section-label">Légende</p>
-            <div><span class="legend-dot ant-dot"></span> Fourmi <em>Exploration</em></div>
+            <div><span class="legend-dot ant-dot"></span> Fourmi <em>Recherche</em></div>
+            <div><span class="legend-dot return-dot"></span> Fourmi <em>Retour au nid</em></div>
             <div><span class="legend-dot nest-dot"></span> Nid <em>Point d'origine</em></div>
             <div><span class="legend-dot food-dot"></span> Nourriture <em>Ressource</em></div>
           </div>
 
           <div class="observation">
             <p class="section-label">Observation</p>
-            <p>Les individus explorent leur environnement par marche aléatoire. Le monde contraint leurs déplacements.</p>
+            <p>Les individus détectent localement la nourriture, en prélèvent une unité puis reviennent directement la déposer au nid.</p>
           </div>
         </aside>
 

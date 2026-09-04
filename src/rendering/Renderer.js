@@ -26,7 +26,9 @@ export class Renderer {
     ctx.clearRect(0, 0, world.width, world.height);
     this.drawGrid(ctx, world);
 
-    for (const source of foodSources) this.drawFood(ctx, source);
+    for (const source of foodSources) {
+      if (source.active) this.drawFood(ctx, source);
+    }
     this.drawNest(ctx, colony.nest);
     for (const ant of colony.ants) this.drawAnt(ctx, ant);
   }
@@ -65,7 +67,8 @@ export class Renderer {
     ctx.beginPath(); ctx.arc(x, y, source.radius + 11, 0, Math.PI * 2); ctx.fill();
     ctx.fillStyle = "#a4c364";
     const seeds = [[-5, -3], [5, -4], [-2, 5], [7, 5], [1, -9]];
-    for (const [offsetX, offsetY] of seeds) {
+    const visibleSeeds = Math.max(1, Math.ceil((source.quantity / source.initialQuantity) * seeds.length));
+    for (const [offsetX, offsetY] of seeds.slice(0, visibleSeeds)) {
       ctx.beginPath(); ctx.arc(x + offsetX, y + offsetY, 4, 0, Math.PI * 2); ctx.fill();
     }
   }
@@ -80,9 +83,17 @@ export class Renderer {
       ctx.beginPath(); ctx.moveTo(-1, side); ctx.lineTo(-5, side * 4); ctx.stroke();
       ctx.beginPath(); ctx.moveTo(1, side); ctx.lineTo(4, side * 4); ctx.stroke();
     }
-    ctx.fillStyle = "#f0b45f";
+    if (ant.carryingFood) {
+      ctx.fillStyle = "rgba(164, 195, 100, 0.18)";
+      ctx.beginPath(); ctx.arc(-3, 0, 6, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.fillStyle = ant.carryingFood ? "#d8cb78" : "#f0b45f";
     ctx.beginPath(); ctx.ellipse(-2.5, 0, 3, 2.2, 0, 0, Math.PI * 2); ctx.fill();
     ctx.beginPath(); ctx.arc(2.5, 0, 1.9, 0, Math.PI * 2); ctx.fill();
+    if (ant.carryingFood) {
+      ctx.fillStyle = "#a4c364";
+      ctx.beginPath(); ctx.arc(-5.5, 0, 1.8, 0, Math.PI * 2); ctx.fill();
+    }
     ctx.restore();
   }
 }

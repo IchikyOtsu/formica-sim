@@ -45,7 +45,8 @@ h1 span { color: var(--accent); font-weight: 500; }
 .muted { margin: 0; color: var(--muted); font: 10px "DM Mono", monospace; }
 .metric-grid { display: grid; grid-template-columns: 1fr 1fr; border-bottom: 1px solid var(--line); }
 .metric { min-height: 95px; padding: 17px 20px; }
-.metric:nth-child(2) { border-right: 1px solid var(--line); }
+.metric:nth-child(even) { border-right: 1px solid var(--line); }
+.metric:nth-child(2), .metric:nth-child(3) { border-bottom: 1px solid var(--line); }
 .metric-wide { grid-column: 1 / -1; border-bottom: 1px solid var(--line); }
 .metric p { margin-bottom: 8px; color: var(--muted); font: 10px "DM Mono", monospace; text-transform: uppercase; letter-spacing: .12em; }
 .metric strong { margin-right: 7px; color: var(--ink); font: 500 30px "DM Mono", monospace; }
@@ -56,6 +57,7 @@ h1 span { color: var(--accent); font-weight: 500; }
 .legend em { color: var(--muted); font: normal 9px "DM Mono", monospace; }
 .legend-dot { width: 7px; height: 7px; border-radius: 50%; }
 .ant-dot { background: var(--accent); }
+.return-dot { background: #d8cb78; box-shadow: 0 0 0 2px rgba(164, 195, 100, .18); }
 .nest-dot { background: #745037; box-shadow: 0 0 0 2px #37281e; }
 .food-dot { background: var(--green); }
 .observation p:last-child { margin: 0; color: #99a08f; font-size: 11px; line-height: 1.7; }

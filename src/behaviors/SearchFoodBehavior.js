@@ -9,11 +9,12 @@ export class SearchFoodBehavior {
 
     if (!ant.target) {
       this.randomWalk.update(ant, deltaSeconds);
-      return;
+      return Infinity;
     }
 
     const dx = ant.target.position.x - ant.position.x;
     const dy = ant.target.position.y - ant.position.y;
     ant.direction = Math.atan2(dy, dx);
+    return Math.hypot(dx, dy);
   }
 }
