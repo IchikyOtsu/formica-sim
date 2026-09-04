@@ -9,6 +9,7 @@ import { evaluatePauseConditions } from "../src/observability/PauseConditions.js
 import { SearchFoodBehavior } from "../src/behaviors/SearchFoodBehavior.js";
 import { ReturnHomeBehavior } from "../src/behaviors/ReturnHomeBehavior.js";
 import { Ant, AntState, Caste } from "../src/entities/Ant.js";
+import { RaidState } from "../src/entities/Raid.js";
 import { Brood, BroodStage } from "../src/entities/Brood.js";
 import { FoodSource, FoodSourceState } from "../src/entities/FoodSource.js";
 import { DangerZone } from "../src/environment/DangerZone.js";
@@ -1895,4 +1896,164 @@ test("soldier production lags a real threat spike and tapers off via demographic
     ratioAfterCalm < ratioAtPressureEnd,
     "the soldier share should recede through demographic dilution, not just an explicit rule",
   );
+});
+
+function raidConfig(overrides = {}) {
+  return multiColonyConfig({
+    antSpeed: 40,
+    combatEnabled: false,
+    nestDiscoveryRadius: 40,
+    raidArrivalRadius: 15,
+    raidGroupSize: 5,
+    ...overrides,
+  });
+}
+
+function pushSoldier(colony, id, overrides = {}) {
+  const soldier = new Ant({
+    id,
+    position: { ...colony.nest.position },
+    direction: 0,
+    speed: 40,
+    colonyId: colony.id,
+    energy: 100,
+    maxEnergy: 100,
+    energyConsumptionRate: 0,
+    maxHealth: 100,
+    attackPower: 10,
+    caste: Caste.SOLDIER,
+    ...overrides,
+  });
+  colony.ants.push(soldier);
+  return soldier;
+}
+
+test("a colony cannot raid a nest it has never discovered, nor without any soldier available", () => {
+  const simulation = new Simulation(raidConfig());
+  const colonyA = simulation.colonies[0];
+  const colonyB = simulation.colonies[1];
+
+  assert.equal(simulation.requestRaid("A", "B"), null, "B has not been discovered yet");
+
+  colonyA.knownEnemyNests.set("B", {
+    position: { ...colonyB.nest.position },
+    discoveredTick: 0,
+    lastSeenTick: 0,
+  });
+  assert.equal(
+    simulation.requestRaid("A", "B"),
+    null,
+    "discovered but colony A only has a worker, no soldier to send",
+  );
+
+  pushSoldier(colonyA, "A-SOLDIER-1");
+  const raid = simulation.requestRaid("A", "B");
+  assert.ok(raid, "a soldier is now available against a known target");
+  assert.equal(raid.targetColonyId, "B");
+});
+
+test("an enemy nest becomes known only once the discovering ant physically reports back home", () => {
+  const simulation = new Simulation(raidConfig());
+  const colonyA = simulation.colonies[0];
+  const colonyB = simulation.colonies[1];
+  const scout = colonyA.ants[0];
+
+  scout.position = { ...colonyB.nest.position };
+  simulation.tick();
+  assert.ok(scout.pendingNestIntel, "the scout has sighted the enemy nest");
+  assert.equal(colonyA.knownEnemyNests.size, 0, "not yet exploitable: the scout has not returned home");
+  assert.equal(
+    simulation.tickEvents.some((event) => event.type === "ENEMY_NEST_DISCOVERED"),
+    false,
+  );
+
+  scout.position = { ...colonyA.nest.position };
+  scout.state = AntState.RETURNING_HOME;
+  simulation.tick();
+
+  assert.equal(colonyA.knownEnemyNests.size, 1);
+  const intel = colonyA.knownEnemyNests.get("B");
+  assert.deepEqual(intel.position, colonyB.nest.position);
+  assert.equal(colonyA.enemyNestsDiscovered, 1);
+  const discovery = simulation.tickEvents.find((event) => event.type === "ENEMY_NEST_DISCOVERED");
+  assert.ok(discovery);
+  assert.equal(discovery.colonyId, "A");
+  assert.equal(discovery.targetColonyId, "B");
+});
+
+test("a raid travels to the memorized enemy nest position and back without teleporting", () => {
+  const simulation = new Simulation(raidConfig());
+  const colonyA = simulation.colonies[0];
+  const colonyB = simulation.colonies[1];
+  const soldier = pushSoldier(colonyA, "A-SOLDIER-1");
+  colonyA.knownEnemyNests.set("B", {
+    position: { ...colonyB.nest.position },
+    discoveredTick: 0,
+    lastSeenTick: 0,
+  });
+
+  const raid = simulation.requestRaid("A", "B", 1);
+  assert.equal(soldier.state, AntState.RAIDING);
+  assert.equal(soldier.raidId, raid.id);
+
+  const maxStepDistance = simulation.config.antSpeed * (simulation.config.tickDurationMs / 1000) + 1e-6;
+  let reachedTarget = false;
+  let previousPosition = { ...soldier.position };
+  for (let tick = 0; tick < 500 && simulation.raids.size > 0; tick += 1) {
+    simulation.tick();
+    const stepDistance = Math.hypot(
+      soldier.position.x - previousPosition.x,
+      soldier.position.y - previousPosition.y,
+    );
+    assert.ok(stepDistance <= maxStepDistance, `no teleportation: moved ${stepDistance} in one tick`);
+    previousPosition = { ...soldier.position };
+    if (raid.state === RaidState.RETURNING || raid.state === RaidState.COMPLETE) reachedTarget = true;
+  }
+
+  assert.ok(reachedTarget, "the raider reached the target nest and turned back");
+  assert.equal(raid.state, RaidState.COMPLETE);
+  assert.equal(simulation.raids.size, 0, "the finished raid is cleared from the active list");
+  assert.equal(soldier.raidId, null);
+  assert.equal(soldier.state, AntState.SEARCHING_FOOD, "the raider resumes normal duty once home");
+  assert.equal(colonyA.raidsStarted, 1);
+  assert.equal(colonyA.raidsCompleted, 1);
+  assert.equal(colonyA.raidsFailed, 0);
+  assert.ok(
+    simulation.tickEvents.some((event) => event.type === "RAID_RETURNED" && event.outcome === RaidState.COMPLETE),
+  );
+});
+
+test("a raid is marked FAILED when every raider dies before returning home", () => {
+  const simulation = new Simulation(raidConfig({ combatEnabled: true, combatRadius: 200 }));
+  const colonyA = simulation.colonies[0];
+  const colonyB = simulation.colonies[1];
+  const raider = pushSoldier(colonyA, "A-SOLDIER-1");
+  colonyA.knownEnemyNests.set("B", {
+    position: { ...colonyB.nest.position },
+    discoveredTick: 0,
+    lastSeenTick: 0,
+  });
+  const raid = simulation.requestRaid("A", "B", 1);
+  assert.ok(raid);
+
+  raider.state = AntState.DEAD;
+  simulation.handleDeath(raider, "COMBAT", colonyA, { killerColony: colonyB, killerCaste: Caste.SOLDIER });
+
+  assert.equal(raid.state, RaidState.FAILED);
+  assert.equal(simulation.raids.size, 0);
+  assert.equal(colonyA.raidsFailed, 1);
+  assert.equal(colonyA.raidsCompleted, 0);
+  assert.equal(colonyA.raidersLost, 1);
+  assert.equal(raider.raidId, null, "a dead raider is cleared from raid bookkeeping");
+});
+
+test("raiding requires the SOLDIER caste and is invisible when castesEnabled stays false", () => {
+  const simulation = new Simulation(raidConfig());
+  assertSimulationInvariants(simulation);
+  for (let tick = 0; tick < 500; tick += 1) simulation.tick();
+  assertSimulationInvariants(simulation);
+  assert.equal(simulation.raids.size, 0, "nothing ever creates a raid on its own");
+  for (const colony of simulation.colonies) {
+    assert.equal(colony.raidsStarted, 0);
+  }
 });
